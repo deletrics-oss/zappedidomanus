@@ -56,7 +56,7 @@ export default function Cardapio() {
   const handleDeleteCategory = async (id: string, name: string) => {
     if (confirm(`Deseja realmente excluir a categoria "${name}"?`)) {
       try {
-        await supabase.from('categories').delete().eq('id', id);
+        await db.collection('categories').delete().eq('id', id);
         toast.success(`"${name}" foi removida do cardápio`);
         loadData();
       } catch (error) {
@@ -68,7 +68,7 @@ export default function Cardapio() {
   const handleDeleteItem = async (id: string, name: string) => {
     if (confirm(`Deseja realmente excluir "${name}"?`)) {
       try {
-        await supabase.from('menu_items').delete().eq('id', id);
+        await db.collection('menu_items').delete().eq('id', id);
         toast.success(`"${name}" foi removido do cardápio`);
         loadData();
       } catch (error) {
@@ -80,7 +80,7 @@ export default function Cardapio() {
   const handleCloneItem = async (item: any) => {
     try {
       const { name, description, price, promotional_price, category_id, image_url, is_available, preparation_time, sort_order } = item;
-      await supabase.from('menu_items').insert({
+      await db.collection('menu_items').insert({
         name: `${name} (Cópia)`,
         description,
         price,
@@ -101,7 +101,7 @@ export default function Cardapio() {
   const handleCloneCategory = async (category: any) => {
     try {
       const { name, description, image_url, is_active, sort_order } = category;
-      await supabase.from('categories').insert({
+      await db.collection('categories').insert({
         name: `${name} (Cópia)`,
         description,
         image_url,
@@ -120,7 +120,7 @@ export default function Cardapio() {
     if (!confirm(`Deseja realmente excluir ${selectedItems.length} item(ns) selecionado(s)?`)) return;
     
     try {
-      await supabase.from('menu_items').delete().in('id', selectedItems);
+      await db.collection('menu_items').delete().in('id', selectedItems);
       toast.success(`${selectedItems.length} item(ns) removido(s) com sucesso`);
       setSelectedItems([]);
       loadData();
@@ -134,7 +134,7 @@ export default function Cardapio() {
     if (!confirm(`Deseja realmente excluir ${selectedCategories.length} categoria(s) selecionada(s)?`)) return;
     
     try {
-      await supabase.from('categories').delete().in('id', selectedCategories);
+      await db.collection('categories').delete().in('id', selectedCategories);
       toast.success(`${selectedCategories.length} categoria(s) removida(s) com sucesso`);
       setSelectedCategories([]);
       loadData();

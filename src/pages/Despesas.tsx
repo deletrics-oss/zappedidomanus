@@ -60,7 +60,7 @@ export default function Despesas() {
           .eq('id', editingExpense.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('expenses').insert([data]);
+        const { error } = await db.collection('expenses').insert([data]);
         if (error) throw error;
       }
     },
@@ -73,7 +73,7 @@ export default function Despesas() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from('expenses').delete().eq('id', id);
+      const { error } = await db.collection('expenses').delete().eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => {

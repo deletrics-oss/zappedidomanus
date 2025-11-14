@@ -117,8 +117,8 @@ export default function CustomerMenu() {
   const loadData = async () => {
     try {
       const [categoriesRes, itemsRes] = await Promise.all([
-        supabase.from('categories').select('*').eq('is_active', true).order('sort_order'),
-        supabase.from('menu_items').select('*').eq('is_available', true).order('sort_order')
+        db.collection('categories').select('*').eq('is_active', true).order('sort_order'),
+        db.collection('menu_items').select('*').eq('is_available', true).order('sort_order')
       ]);
 
       if (categoriesRes.data) setCategories(categoriesRes.data);

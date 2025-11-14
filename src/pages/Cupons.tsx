@@ -6,11 +6,23 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Ticket, Copy, Trash2, Plus } from "lucide-react";
-import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
+import { getDocuments, createDocument, deleteDocument, updateDocument } from "@/lib/firebase-db";
+import { orderBy } from "firebase/firestore";
+
+interface Coupon {
+  id: string;
+  code: string;
+  type: "percentage" | "fixed" | "free_shipping";
+  discountValue: number;
+  minOrderValue: number;
+  maxUses: number;
+  currentUses: number;
+  isActive: boolean;
+}
 
 export default function Cupons() {
-  const [cupons, setCupons] = useState<any[]>([]);
+  const [cupons, setCupons] = useState<Coupon[]>([]);
   const [code, setCode] = useState("");
   const [type, setType] = useState<"percentage" | "fixed" | "free_shipping">("percentage");
   const [discountValue, setDiscountValue] = useState(0);
@@ -22,12 +34,26 @@ export default function Cupons() {
   }, []);
 
   const loadCupons = async () => {
-    const { data } = await supabase
-      .from('coupons')
-      .select('*')
-      .order('created_at', { ascending: false });
-    
-    setCupons(data || []);
+    try {
+      const data = await getDocuments('coupons', [orderBy('createdAt', 'desc')]);
+      
+      // Mapeamento para o formato da interface
+      const mappedCupons = data.map(doc => ({
+        id: doc.id,
+        code: doc.code,
+        type: doc.type,
+        discountValue: doc.discountValue || 0,
+        minOrderValue: doc.minOrderValue || 0,
+        maxUses: doc.maxUses || 0,
+        currentUses: doc.currentUses || 0,
+        isActive: doc.isActive || false,
+      })) as Coupon[];
+
+      setCupons(mappedCupons);
+    } catch (error) {
+      console.error("Erro ao carregar cupons:", error);
+      toast.error("Erro ao carregar cupons.");
+    }
   };
 
   const handleCreateCoupon = async () => {
@@ -36,26 +62,28 @@ export default function Cupons() {
       return;
     }
 
-    const { error } = await supabase.from('coupons').insert([{
-      code: code.toUpperCase(),
-      type,
-      discount_value: discountValue,
-      min_order_value: minOrderValue,
-      max_uses: maxUses,
-      is_active: true
-    }]);
+    try {
+      await createDocument('coupons', {
+        code: code.toUpperCase(),
+        type,
+        discountValue,
+        minOrderValue,
+        maxUses,
+        currentUses: 0,
+        isActive: true,
+        createdAt: new Date().toISOString(),
+      });
 
-    if (error) {
-      toast.error('Erro ao criar cupom: ' + error.message);
-      return;
+      toast.success('Cupom criado com sucesso!');
+      setCode('');
+      setDiscountValue(0);
+      setMinOrderValue(0);
+      setMaxUses(100);
+      loadCupons();
+    } catch (error: any) {
+      console.error('Erro ao criar cupom:', error);
+      toast.error('Erro ao criar cupom: ' + (error.message || 'Verifique o console.'));
     }
-
-    toast.success('Cupom criado com sucesso!');
-    setCode('');
-    setDiscountValue(0);
-    setMinOrderValue(0);
-    setMaxUses(100);
-    loadCupons();
   };
 
   const handleCopyCoupon = (code: string) => {
@@ -64,30 +92,29 @@ export default function Cupons() {
   };
 
   const handleDeleteCoupon = async (id: string) => {
-    const { error } = await supabase.from('coupons').delete().eq('id', id);
-    
-    if (error) {
-      toast.error('Erro ao deletar cupom');
-      return;
-    }
+    if (!window.confirm('Tem certeza que deseja deletar este cupom?')) return;
 
-    toast.success('Cupom deletado');
-    loadCupons();
+    try {
+      await deleteDocument('coupons', id);
+      
+      toast.success('Cupom deletado');
+      loadCupons();
+    } catch (error) {
+      console.error('Erro ao deletar cupom:', error);
+      toast.error('Erro ao deletar cupom');
+    }
   };
 
   const handleToggleActive = async (id: string, currentStatus: boolean) => {
-    const { error } = await supabase
-      .from('coupons')
-      .update({ is_active: !currentStatus })
-      .eq('id', id);
+    try {
+      await updateDocument('coupons', id, { isActive: !currentStatus });
 
-    if (error) {
+      toast.success('Status atualizado');
+      loadCupons();
+    } catch (error) {
+      console.error('Erro ao atualizar status:', error);
       toast.error('Erro ao atualizar status');
-      return;
     }
-
-    toast.success('Status atualizado');
-    loadCupons();
   };
 
   return (
@@ -193,11 +220,11 @@ export default function Cupons() {
                 </div>
                 <div className="flex gap-2">
                   <Badge 
-                    className={cupom.is_active ? 'bg-green-500' : 'bg-gray-500'}
-                    onClick={() => handleToggleActive(cupom.id, cupom.is_active)}
+                    className={cupom.isActive ? 'bg-green-500' : 'bg-gray-500'}
+                    onClick={() => handleToggleActive(cupom.id, cupom.isActive)}
                     style={{ cursor: 'pointer' }}
                   >
-                    {cupom.is_active ? 'Ativo' : 'Inativo'}
+                    {cupom.isActive ? 'Ativo' : 'Inativo'}
                   </Badge>
                 </div>
               </div>
@@ -215,17 +242,17 @@ export default function Cupons() {
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Desconto:</span>
                 <span className="font-medium">
-                  {cupom.type === 'percentage' ? `${cupom.discount_value}%` : 
-                   cupom.type === 'fixed' ? `R$ ${cupom.discount_value}` : 'Frete Grátis'}
+                  {cupom.type === 'percentage' ? `${cupom.discountValue}%` : 
+                   cupom.type === 'fixed' ? `R$ ${cupom.discountValue}` : 'Frete Grátis'}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Pedido mínimo:</span>
-                <span className="font-medium">R$ {Number(cupom.min_order_value).toFixed(2)}</span>
+                <span className="font-medium">R$ {Number(cupom.minOrderValue).toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Usos:</span>
-                <span className="font-medium">{cupom.current_uses} / {cupom.max_uses}</span>
+                <span className="font-medium">{cupom.currentUses} / {cupom.maxUses}</span>
               </div>
             </div>
           </Card>

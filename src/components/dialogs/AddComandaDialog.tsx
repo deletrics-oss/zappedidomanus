@@ -31,7 +31,7 @@ export function AddComandaDialog({ open, onOpenChange, tables, onSuccess }: AddC
       // Generate order number
       const orderNumber = `CMD${Date.now().toString().slice(-6)}`;
 
-      const { error } = await supabase.from('orders').insert({
+      const { error } = await db.collection('orders').insert({
         order_number: orderNumber,
         customer_name: customerName || null,
         customer_phone: customerPhone || null,

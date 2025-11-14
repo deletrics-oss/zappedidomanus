@@ -46,7 +46,7 @@ export function ManageTablesDialog({ open, onOpenChange, onSuccess }: ManageTabl
 
     setLoading(true);
     try {
-      const { error } = await supabase.from('tables').insert({
+      const { error } = await db.collection('tables').insert({
         number: parseInt(newTableNumber),
         capacity: parseInt(newTableCapacity),
         status: 'free',
@@ -75,7 +75,7 @@ export function ManageTablesDialog({ open, onOpenChange, onSuccess }: ManageTabl
     if (!confirm('Tem certeza que deseja remover esta mesa?')) return;
 
     try {
-      const { error } = await supabase.from('tables').delete().eq('id', id);
+      const { error } = await db.collection('tables').delete().eq('id', id);
 
       if (error) throw error;
 

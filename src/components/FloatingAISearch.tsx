@@ -34,15 +34,15 @@ export function FloatingAISearch({ onClose }: { onClose?: () => void }) {
     setIsSearching(true);
     try {
       const [menuItems, orders, categories, customers, suppliers, tables, inventory, coupons, users] = await Promise.all([
-        supabase.from('menu_items').select('id, name, description, price').ilike('name', `%${searchTerm}%`).limit(5),
-        supabase.from('orders').select('id, order_number, customer_name, total, status').or(`order_number.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%`).limit(5),
-        supabase.from('categories').select('id, name, description').ilike('name', `%${searchTerm}%`).limit(3),
-        supabase.from('customers').select('id, name, phone').or(`name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`).limit(3),
-        supabase.from('suppliers').select('id, name, phone').or(`name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`).limit(3),
-        supabase.from('tables').select('id, number, status').limit(5),
-        supabase.from('inventory').select('id, name, current_quantity, unit').ilike('name', `%${searchTerm}%`).limit(3),
-        supabase.from('coupons').select('id, code, type, discount_value').ilike('code', `%${searchTerm}%`).limit(3),
-        supabase.from('profiles').select('id, full_name, phone').or(`full_name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`).limit(3),
+        db.collection('menu_items').select('id, name, description, price').ilike('name', `%${searchTerm}%`).limit(5),
+        db.collection('orders').select('id, order_number, customer_name, total, status').or(`order_number.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%`).limit(5),
+        db.collection('categories').select('id, name, description').ilike('name', `%${searchTerm}%`).limit(3),
+        db.collection('customers').select('id, name, phone').or(`name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`).limit(3),
+        db.collection('suppliers').select('id, name, phone').or(`name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`).limit(3),
+        db.collection('tables').select('id, number, status').limit(5),
+        db.collection('inventory').select('id, name, current_quantity, unit').ilike('name', `%${searchTerm}%`).limit(3),
+        db.collection('coupons').select('id, code, type, discount_value').ilike('code', `%${searchTerm}%`).limit(3),
+        db.collection('profiles').select('id, full_name, phone').or(`full_name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`).limit(3),
       ]);
 
       const allResults = [

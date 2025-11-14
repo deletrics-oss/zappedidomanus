@@ -141,7 +141,7 @@ export default function TableCustomerMenu() {
           notes: itemNotes || null
         }));
 
-        const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
+        const { error: itemsError } = await db.collection('order_items').insert(orderItems);
         
         if (itemsError) {
           console.error('❌ Erro ao inserir itens:', itemsError);
@@ -203,7 +203,7 @@ export default function TableCustomerMenu() {
 
         console.log('📦 Inserindo itens:', orderItems);
 
-        const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
+        const { error: itemsError } = await db.collection('order_items').insert(orderItems);
         
         if (itemsError) {
           console.error('❌ Erro ao inserir itens:', itemsError);

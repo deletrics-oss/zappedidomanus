@@ -406,7 +406,7 @@ export default function PDV() {
       };
 
       // Registrar movimentação no caixa
-      const { error: cashError } = await supabase.from('cash_movements').insert([{
+      const { error: cashError } = await db.collection('cash_movements').insert([{
         type: 'entrada',
         description: `Pedido ${orderNumber} - ${deliveryType === 'dine_in' ? 'Balcão' : deliveryType === 'online' ? 'Online' : 'Retirada'}`,
         amount: total,
