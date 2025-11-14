@@ -4,8 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { db } from '@/lib/firebase-db';
 import { toast } from 'sonner';
+import { createDocument, updateDocument } from '@/lib/firebase-db';
+import { useAuth } from '@/hooks/useAuth';
 
 interface AddComandaDialogProps {
   open: boolean;
@@ -15,6 +16,7 @@ interface AddComandaDialogProps {
 }
 
 export function AddComandaDialog({ open, onOpenChange, tables, onSuccess }: AddComandaDialogProps) {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -25,36 +27,35 @@ export function AddComandaDialog({ open, onOpenChange, tables, onSuccess }: AddC
     setLoading(true);
 
     try {
-      const { data: user } = await supabase.auth.getUser();
-      if (!user.user) throw new Error('Usuário não autenticado');
+      if (!user) throw new Error('Usuário não autenticado');
 
       // Generate order number
       const orderNumber = `CMD${Date.now().toString().slice(-6)}`;
+      const now = new Date().toISOString();
 
-      const { error } = await db.collection('orders').insert({
-        order_number: orderNumber,
-        customer_name: customerName || null,
-        customer_phone: customerPhone || null,
-        delivery_type: 'dine_in',
+      const newOrderData = {
+        orderNumber: orderNumber,
+        customerName: customerName || null,
+        customerPhone: customerPhone || null,
+        deliveryType: 'dine_in',
         status: 'new',
-        table_id: tableId || null,
+        tableId: tableId || null,
         subtotal: 0,
-        delivery_fee: 0,
-        service_fee: 0,
+        deliveryFee: 0,
+        serviceFee: 0,
         discount: 0,
         total: 0,
-        payment_method: 'pending',
-        created_by: user.user.id,
-      });
+        paymentMethod: 'pending',
+        createdBy: user.id,
+        createdAt: now,
+        updatedAt: now,
+      };
 
-      if (error) throw error;
+      await createDocument('orders', newOrderData);
 
       // Update table status if table was selected
       if (tableId) {
-        await supabase
-          .from('tables')
-          .update({ status: 'occupied' })
-          .eq('id', tableId);
+        await updateDocument('tables', tableId, { status: 'occupied' });
       }
 
       toast.success('Comanda criada com sucesso!');
