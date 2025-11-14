@@ -4,12 +4,12 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0 --port 9111",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "preview": "vite preview",
-    "seed": "node seed-firebase.js"
+    "preview": "vite preview --host 0.0.0.0 --port 4000",
+    "seed": "node seed-firebase.js",\n    "start": "npm run build && serve -s dist -l 4000"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
