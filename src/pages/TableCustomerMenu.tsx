@@ -7,8 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Minus, ShoppingCart, Check } from "lucide-react";
-import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
+import { getDocument, getDocuments, createDocument, updateDocument } from "@/lib/firebase-db";
+import { where, query, orderBy } from "firebase/firestore";
 
 interface CartItem {
   id: string;
@@ -37,42 +38,43 @@ export default function TableCustomerMenu() {
   }, [tableId]);
 
   const loadData = async () => {
+    if (!tableId) return;
     try {
       // Load table info
-      const { data: tableData } = await supabase
-        .from('tables')
-        .select('*')
-        .eq('id', tableId)
-        .single();
-
+      const tableData = await getDocument('tables', tableId);
       setTable(tableData);
 
       // Load active order for this table
-      const { data: orderData } = await supabase
-        .from('orders')
-        .select('*, order_items(*)')
-        .eq('table_id', tableId)
-        .in('status', ['new', 'confirmed', 'preparing'])
-        .single();
-
-      setOrder(orderData);
+      const activeOrders = await getDocuments('orders', [
+        where('tableId', '==', tableId),
+        where('status', 'in', ['new', 'confirmed', 'preparing']),
+        orderBy('createdAt', 'desc')
+      ]);
+      
+      const activeOrder = activeOrders.length > 0 ? activeOrders[0] : null;
+      
+      if (activeOrder) {
+        // Load order items for the active order
+        const orderItems = await getDocuments('orderItems', [
+          where('orderId', '==', activeOrder.id)
+        ]);
+        setOrder({ ...activeOrder, orderItems });
+      } else {
+        setOrder(null);
+      }
 
       // Load menu items
-      const { data: items } = await supabase
-        .from('menu_items')
-        .select('*')
-        .eq('is_available', true)
-        .order('sort_order');
-
+      const items = await getDocuments('menuItems', [
+        where('isAvailable', '==', true),
+        orderBy('sortOrder')
+      ]);
       setMenuItems(items || []);
 
       // Load categories
-      const { data: cats } = await supabase
-        .from('categories')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order');
-
+      const cats = await getDocuments('categories', [
+        where('isActive', '==', true),
+        orderBy('sortOrder')
+      ]);
       setCategories(cats || []);
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
@@ -93,7 +95,7 @@ export default function TableCustomerMenu() {
       return [...prev, {
         id: item.id,
         name: item.name,
-        price: item.promotional_price || item.price,
+        price: item.promotionalPrice || item.price,
         quantity: 1
       }];
     });
@@ -118,104 +120,67 @@ export default function TableCustomerMenu() {
     try {
       const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
       const orderNumber = `M${table?.number}-${Date.now().toString().slice(-4)}`;
-
-      console.log('🛒 Mesa - Criando pedido:', {
-        orderNumber,
-        tableId,
-        cart,
-        total,
-        notes: itemNotes
-      });
+      const now = new Date().toISOString();
 
       if (order) {
         // Update existing order
-        console.log('📝 Adicionando itens ao pedido existente:', order.id);
-        
-        const orderItems = cart.map(item => ({
-          order_id: order.id,
-          menu_item_id: item.id,
+        const newItems = cart.map(item => ({
+          orderId: order.id,
+          menuItemId: item.id,
           name: item.name,
           quantity: item.quantity,
-          unit_price: item.price,
-          total_price: item.price * item.quantity,
-          notes: itemNotes || null
+          unitPrice: item.price,
+          totalPrice: item.price * item.quantity,
+          notes: itemNotes || null,
+          createdAt: now,
         }));
 
-        const { error: itemsError } = await db.collection('order_items').insert(orderItems);
-        
-        if (itemsError) {
-          console.error('❌ Erro ao inserir itens:', itemsError);
-          throw itemsError;
-        }
+        // Firestore não tem insert many nativo, mas o createDocument aceita
+        // Vou usar um loop simples para garantir a inserção
+        const itemPromises = newItems.map(item => createDocument('orderItems', item));
+        await Promise.all(itemPromises);
 
-        console.log('✅ Itens adicionados com sucesso!');
+        // Recalcular total
+        const allItems = await getDocuments('orderItems', [where('orderId', '==', order.id)]);
+        const newTotal = allItems.reduce((sum: number, i: any) => sum + i.totalPrice, 0);
 
-        const { data: allItems } = await supabase
-          .from('order_items')
-          .select('total_price')
-          .eq('order_id', order.id);
+        await updateDocument('orders', order.id, {
+          total: newTotal,
+          subtotal: newTotal,
+          updatedAt: now
+        });
 
-        const newTotal = (allItems || []).reduce((sum: number, i: any) => sum + i.total_price, 0);
-
-        await supabase
-          .from('orders')
-          .update({
-            total: newTotal,
-            subtotal: newTotal,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', order.id);
-
-        console.log('✅ Total atualizado:', newTotal);
       } else {
         // Create new order
-        console.log('🆕 Criando novo pedido para mesa');
-        
-        const { data: newOrder, error: orderError } = await supabase
-          .from('orders')
-          .insert([{
-            order_number: orderNumber,
-            table_id: tableId,
-            delivery_type: 'dine_in' as const,
-            status: 'new' as const,
-            total: total,
-            subtotal: total,
-          }])
-          .select()
-          .single();
+        const newOrderData = {
+          orderNumber,
+          tableId,
+          deliveryType: 'dine_in',
+          status: 'new',
+          total: total,
+          subtotal: total,
+          createdAt: now,
+          updatedAt: now,
+        };
 
-        if (orderError) {
-          console.error('❌ Erro ao criar pedido:', orderError);
-          throw orderError;
-        }
-
-        console.log('✅ Pedido criado:', newOrder);
+        const newOrderRef = await createDocument('orders', newOrderData);
+        const newOrderId = newOrderRef.id;
 
         const orderItems = cart.map(item => ({
-          order_id: newOrder.id,
-          menu_item_id: item.id,
+          orderId: newOrderId,
+          menuItemId: item.id,
           name: item.name,
           quantity: item.quantity,
-          unit_price: item.price,
-          total_price: item.price * item.quantity,
-          notes: itemNotes || null
+          unitPrice: item.price,
+          totalPrice: item.price * item.quantity,
+          notes: itemNotes || null,
+          createdAt: now,
         }));
 
-        console.log('📦 Inserindo itens:', orderItems);
+        const itemPromises = orderItems.map(item => createDocument('orderItems', item));
+        await Promise.all(itemPromises);
 
-        const { error: itemsError } = await db.collection('order_items').insert(orderItems);
-        
-        if (itemsError) {
-          console.error('❌ Erro ao inserir itens:', itemsError);
-          throw itemsError;
-        }
-
-        console.log('✅ Itens inseridos com sucesso!');
-
-        await supabase
-          .from('tables')
-          .update({ status: 'occupied' })
-          .eq('id', tableId);
+        await updateDocument('tables', tableId, { status: 'occupied' });
       }
 
       toast.success('Pedido enviado com sucesso!');
@@ -230,7 +195,7 @@ export default function TableCustomerMenu() {
 
   const filteredItems = menuItems.filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = selectedCategory === "all" || item.category_id === selectedCategory;
+    const matchesCategory = selectedCategory === "all" || item.categoryId === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
@@ -284,9 +249,9 @@ export default function TableCustomerMenu() {
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {filteredItems.map((item) => (
               <Card key={item.id} className="p-4 hover:shadow-lg transition-shadow">
-                {item.image_url && (
+                {item.imageUrl && (
                   <img
-                    src={item.image_url}
+                    src={item.imageUrl}
                     alt={item.name}
                     className="w-full h-40 object-cover rounded-md mb-3"
                   />
@@ -296,10 +261,10 @@ export default function TableCustomerMenu() {
                   <p className="text-sm text-muted-foreground mb-2">{item.description}</p>
                 )}
                 <div className="flex justify-between items-center">
-                  {item.promotional_price ? (
+                  {item.promotionalPrice ? (
                     <div>
                       <span className="font-bold text-green-600">
-                        R$ {item.promotional_price.toFixed(2)}
+                        R$ {item.promotionalPrice.toFixed(2)}
                       </span>
                       <span className="text-sm text-muted-foreground line-through ml-2">
                         R$ {item.price.toFixed(2)}
@@ -332,33 +297,28 @@ export default function TableCustomerMenu() {
                 </p>
               ) : (
                 cart.map((item) => (
-                  <div key={item.id} className="border-b pb-3">
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="flex-1">
-                        <p className="font-medium text-sm">{item.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          R$ {item.price.toFixed(2)} x {item.quantity}
-                        </p>
-                      </div>
-                      <p className="font-bold">
-                        R$ {(item.price * item.quantity).toFixed(2)}
-                      </p>
+                  <div key={item.id} className="flex justify-between items-center border-b pb-3">
+                    <div>
+                      <p className="font-medium">{item.name}</p>
+                      <p className="text-sm text-muted-foreground">R$ {item.price.toFixed(2)}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
+                      <Button 
+                        variant="outline" 
+                        size="icon" 
+                        className="h-6 w-6"
                         onClick={() => updateQuantity(item.id, -1)}
                       >
-                        <Minus className="h-3 w-3" />
+                        <Minus className="h-4 w-4" />
                       </Button>
-                      <span className="w-8 text-center">{item.quantity}</span>
-                      <Button
-                        size="sm"
-                        variant="outline"
+                      <span className="font-bold">{item.quantity}</span>
+                      <Button 
+                        variant="outline" 
+                        size="icon" 
+                        className="h-6 w-6"
                         onClick={() => updateQuantity(item.id, 1)}
                       >
-                        <Plus className="h-3 w-3" />
+                        <Plus className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
@@ -366,28 +326,25 @@ export default function TableCustomerMenu() {
               )}
             </div>
 
-            <div className="border-t pt-4 space-y-3">
-              <div>
-                <Label>Observações</Label>
-                <Textarea
-                  placeholder="Ex: Sem cebola, ponto da carne..."
-                  value={itemNotes}
-                  onChange={(e) => setItemNotes(e.target.value)}
-                  rows={2}
-                  className="mt-1"
-                />
-              </div>
+            <div className="space-y-4">
+              <Textarea
+                placeholder="Observações do pedido (ex: sem cebola, ponto da carne)"
+                value={itemNotes}
+                onChange={(e) => setItemNotes(e.target.value)}
+              />
               
-              <div className="flex justify-between items-center">
-                <span className="font-semibold">Total</span>
-                <span className="text-2xl font-bold">R$ {totalAmount.toFixed(2)}</span>
+              <div className="flex justify-between font-bold text-lg border-t pt-4">
+                <span>Total:</span>
+                <span>R$ {totalAmount.toFixed(2)}</span>
               </div>
-              <Button
-                className="w-full"
+
+              <Button 
+                className="w-full gap-2" 
+                size="lg"
                 onClick={handleFinishOrder}
                 disabled={cart.length === 0}
               >
-                <Check className="h-4 w-4 mr-2" />
+                <Check className="h-5 w-5" />
                 Enviar Pedido
               </Button>
             </div>

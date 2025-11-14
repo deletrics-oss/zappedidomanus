@@ -8,7 +8,7 @@ import { AudioManager } from "@/components/AudioManager";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/firebase";
 import { toast } from "sonner";
 import { generatePrintReceipt } from "@/components/PrintReceipt";
 

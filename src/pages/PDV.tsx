@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/firebase";
 import { generatePrintReceipt } from "@/components/PrintReceipt";
 import { toast as sonnerToast } from "sonner";
 import { OrderDetailsDialog } from "@/components/dialogs/OrderDetailsDialog";

@@ -7,7 +7,7 @@ import { Settings, MapPin, Clock, CreditCard, Printer, Info, Palette, Volume2, D
 import { ThemeSelector } from "@/components/ThemeSelector";
 import { AudioManager } from "@/components/AudioManager";
 import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/firebase";
 import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
 import { useCEP } from "@/hooks/useCEP";

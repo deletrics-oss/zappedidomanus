@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Edit, Trash2, Search, User, AlertTriangle, Copy } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/firebase";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { useCEP } from "@/hooks/useCEP";

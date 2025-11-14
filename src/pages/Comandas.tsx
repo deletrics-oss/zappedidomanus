@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Users, Plus, Search, Clock, DollarSign, Eye, Printer } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/firebase";
 import { toast } from "sonner";
 import { AddComandaDialog } from "@/components/dialogs/AddComandaDialog";
 import { AddItemsToComandaDialog } from "@/components/dialogs/AddItemsToComandaDialog";

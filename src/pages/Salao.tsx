@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Settings as SettingsIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/firebase";
 import { toast } from "sonner";
 import { ManageTablesDialog } from "@/components/dialogs/ManageTablesDialog";
 import { QRCodeGenerator } from "@/components/QRCodeGenerator";

@@ -5,7 +5,7 @@ import { Plus, Edit, Trash2, Sparkles, Copy, Trash } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/firebase";
 import { EditCategoryDialog } from "@/components/dialogs/EditCategoryDialog";
 import { EditMenuItemDialog } from "@/components/dialogs/EditMenuItemDialog";
 import { AddCategoryDialog } from "@/components/dialogs/AddCategoryDialog";

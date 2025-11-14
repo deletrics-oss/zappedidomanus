@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { ShoppingBag, ChefHat, TrendingUp, Package, Clock, MessageSquare, Settings as SettingsIcon, BarChart3, Image, Utensils, Monitor } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/firebase";
 
 export default function Dashboard() {
   const navigate = useNavigate();

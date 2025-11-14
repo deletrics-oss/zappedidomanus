@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { DollarSign, ShoppingBag, TrendingUp, Calendar as CalendarIcon, BarChart3, CreditCard, Printer } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/firebase";
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
