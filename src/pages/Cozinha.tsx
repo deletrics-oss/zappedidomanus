@@ -3,6 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChefHat, Clock, CheckCircle, Volume2, ExternalLink } from "lucide-react";
 import { db } from "@/lib/firebase";
+import { collection, query, where, getDocs, onSnapshot, updateDoc, doc, orderBy } from 'firebase/firestore';
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { AudioManager } from "@/components/AudioManager";
@@ -38,68 +39,43 @@ export default function Cozinha() {
     loadOrders();
     
     // Realtime subscription
-    const channel = supabase
-      .channel('kitchen-orders')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'orders'
-        },
-        () => {
-          loadOrders();
-        }
-      )
-      .subscribe();
+    const q = query(collection(db, "orders"), where("status", "in", ["confirmed", "preparing"]));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      loadOrders();
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, []);
 
   const loadOrders = async () => {
     try {
       // Load menu items
-      const { data: menuData } = await supabase
-        .from('menu_items')
-        .select('*');
+      const menuSnapshot = await getDocs(collection(db, 'menu_items'));
+      const menuData = menuSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       if (menuData) setMenuItems(menuData);
 
       // Load inventory
-      const { data: invData } = await supabase
-        .from('inventory')
-        .select('*')
-        .lte('current_quantity', 'min_quantity');
+      // NOTE: Firestore does not support direct filtering like lte on different fields.
+      // This logic needs to be implemented client-side or with a more complex query/data structure.
+      // For now, we fetch all inventory and filter in the client.
+      const invSnapshot = await getDocs(collection(db, 'inventory'));
+      const allInvData = invSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const invData = allInvData.filter(item => item.current_quantity <= item.min_quantity);
       if (invData) setInventory(invData);
 
-      const { data: ordersData, error: ordersError } = await supabase
-        .from('orders')
-        .select('*')
-        .in('status', ['confirmed', 'preparing'])
-        .order('created_at', { ascending: true });
-
-      if (ordersError) throw ordersError;
-
-      const ordersWithItems = await Promise.all(
-        (ordersData || []).map(async (order) => {
-          const { data: items } = await supabase
-            .from('order_items')
-            .select('*')
-            .eq('order_id', order.id);
-
-          return {
-            id: order.id,
-            order_number: order.order_number,
-            table_id: order.table_id,
-            delivery_type: order.delivery_type,
-            items: items || [],
-            created_at: order.created_at,
-            status: order.status,
-            notes: order.notes
-          };
-        })
+      const ordersQuery = query(
+        collection(db, 'orders'), 
+        where('status', 'in', ['confirmed', 'preparing']),
+        orderBy('created_at', 'asc')
       );
+      const ordersSnapshot = await getDocs(ordersQuery);
+      const ordersWithItems = ordersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        items: doc.data().order_items || [] // Assuming order_items is a nested array
+      }));
 
       setOrders(ordersWithItems);
     } catch (error) {
@@ -111,10 +87,7 @@ export default function Cozinha() {
 
   const handleStartPreparing = async (orderId: string) => {
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({ status: 'preparing' })
-        .eq('id', orderId);
+      const { error } = await updateDoc(doc(db, 'orders', orderId), { status: 'preparing' });
 
       if (error) throw error;
       toast.success("Pedido em preparação");
@@ -126,10 +99,7 @@ export default function Cozinha() {
 
   const handleComplete = async (orderId: string) => {
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({ status: 'ready' })
-        .eq('id', orderId);
+      const { error } = await updateDoc(doc(db, 'orders', orderId), { status: 'ready' });
 
       if (error) throw error;
       toast.success("Pedido pronto!");

@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { db } from "@/lib/firebase";
+import { collection, query, where, getDocs, onSnapshot, updateDoc, doc, orderBy, limit, addDoc } from 'firebase/firestore';
 import { generatePrintReceipt } from "@/components/PrintReceipt";
 import { toast as sonnerToast } from "sonner";
 import { OrderDetailsDialog } from "@/components/dialogs/OrderDetailsDialog";
@@ -75,28 +76,21 @@ export default function PDV() {
     loadRecentlyClosedOrders();
 
     // Atualizar pedidos pendentes em tempo real
-    const channel = supabase
-      .channel('orders_changes')
-      .on('postgres_changes' as any, {
-        event: '*',
-        schema: 'public',
-        table: 'orders'
-      }, () => {
-        loadPendingOrders();
-      })
-      .subscribe();
+    const q = query(collection(db, "orders"), where("status", "in", ["new", "confirmed", "preparing", "ready"]));
+    const unsubscribe = onSnapshot(q, () => {
+      loadPendingOrders();
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, []);
 
   const loadRestaurantSettings = async () => {
     try {
-      const { data } = await supabase
-        .from('restaurant_settings' as any)
-        .select('name')
-        .maybeSingle();
+      const docRef = doc(db, 'settings', 'restaurant');
+      const docSnap = await getDoc(docRef);
+      const data = docSnap.exists() ? docSnap.data() : null;
 
       if (data?.name) {
         setRestaurantName(data.name);
@@ -107,45 +101,39 @@ export default function PDV() {
   };
 
   const loadCategories = async () => {
-    const { data } = await supabase
-      .from('categories' as any)
-      .select('*')
-      .eq('is_active', true)
-      .order('sort_order');
-    
+    const q = query(collection(db, 'categories'), where('is_active', '==', true), orderBy('sort_order'));
+    const snapshot = await getDocs(q);
+    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     if (data) setCategories(data);
   };
 
   const loadMenuItems = async () => {
-    const { data } = await supabase
-      .from('menu_items' as any)
-      .select('*')
-      .eq('is_available', true)
-      .order('sort_order');
-    
+    const q = query(collection(db, 'menu_items'), where('is_available', '==', true), orderBy('sort_order'));
+    const snapshot = await getDocs(q);
+    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     if (data) setMenuItems(data);
   };
 
   const loadTables = async () => {
-    const { data } = await supabase
-      .from('tables' as any)
-      .select('*')
-      .order('number');
-    
+    const q = query(collection(db, 'tables'), orderBy('number'));
+    const snapshot = await getDocs(q);
+    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     if (data) setTables(data);
   };
 
   const loadPendingOrders = async () => {
     try {
-      const { data: orders } = await supabase
-        .from('orders' as any)
-        .select(`
-          *,
-          order_items:order_items(*),
-          tables(number)
-        `)
-        .in('status', ['new', 'confirmed', 'preparing', 'ready'])
-        .order('created_at', { ascending: false });
+      const q = query(
+        collection(db, 'orders'), 
+        where('status', 'in', ['new', 'confirmed', 'preparing', 'ready']),
+        orderBy('created_at', 'desc')
+      );
+      const snapshot = await getDocs(q);
+      const orders = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        order_items: doc.data().order_items || [] // Assuming nested items
+      }));
 
       if (orders) setPendingOrders(orders);
     } catch (error) {
@@ -155,16 +143,18 @@ export default function PDV() {
 
   const loadRecentlyClosedOrders = async () => {
     try {
-      const { data: orders } = await supabase
-        .from('orders' as any)
-        .select(`
-          *,
-          order_items:order_items(*),
-          tables(number)
-        `)
-        .eq('status', 'completed')
-        .order('completed_at', { ascending: false })
-        .limit(5);
+      const q = query(
+        collection(db, 'orders'), 
+        where('status', '==', 'completed'),
+        orderBy('completed_at', 'desc'),
+        limit(5)
+      );
+      const snapshot = await getDocs(q);
+      const orders = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        order_items: doc.data().order_items || [] // Assuming nested items
+      }));
 
       if (orders) setRecentlyClosedOrders(orders);
     } catch (error) {
@@ -187,22 +177,18 @@ export default function PDV() {
 
     try {
       // Atualizar pedido como completo
-      const { error: orderError } = await supabase
-        .from('orders' as any)
-        .update({ 
-          status: 'completed',
-          completed_at: new Date().toISOString()
-        })
-        .eq('id', currentOrder.id);
+      const orderRef = doc(db, 'orders', currentOrder.id);
+      await updateDoc(orderRef, { 
+        status: 'completed',
+        completed_at: new Date()
+      });
 
-      if (orderError) throw orderError;
+      // No error object from updateDoc in Firebase, assuming success if no exception is thrown
 
       // Liberar mesa se for pedido no local
       if (currentOrder.table_id) {
-        await supabase
-          .from('tables' as any)
-          .update({ status: 'free' })
-          .eq('id', currentOrder.table_id);
+        const tableRef = doc(db, 'tables', currentOrder.table_id);
+      await updateDoc(tableRef, { status: 'free' });
       }
 
       // Registrar entrada no caixa
@@ -210,19 +196,17 @@ export default function PDV() {
         'cash': 'Dinheiro',
         'credit_card': 'Cartão',
         'debit_card': 'Cartão',
-        'pix': 'PIX'
-      };
-
-      await supabase
-        .from('cash_movements' as any)
-        .insert({
-          type: 'entrada',
-          amount: currentOrder.total,
-          category: 'Venda',
-          description: `Pedido ${currentOrder.order_number}`,
-          payment_method: paymentMethodMap[currentOrder.payment_method] || 'Dinheiro',
-          movement_date: new Date().toISOString().split('T')[0]
-        });
+ // Registrar movimentação no caixa
+      await addDoc(collection(db, 'cash_movements'), {
+        type: 'entrada',
+        amount: total,
+        category: 'Venda',
+        description: `Pedido ${orderNumber}`,
+        payment_method: paymentMethodMap[paymentMethod] || 'Dinheiro',
+        movement_date: new Date().toISOString().split('T')[0],
+        createdAt: new Date()
+      });  });    createdAt: new Date()
+      });
 
       sonnerToast.success(`Pedido ${currentOrder.order_number} fechado com sucesso!`);
       
@@ -251,11 +235,13 @@ export default function PDV() {
 
   const handleAddToCart = async (item: MenuItem) => {
     // Check if item has variations
-    const { data: variations } = await supabase
-      .from('item_variations')
-      .select('*')
-      .eq('menu_item_id', item.id)
-      .eq('is_active', true);
+    const q = query(
+        collection(db, 'item_variations'), 
+        where('menu_item_id', '==', item.id),
+        where('is_active', '==', true)
+      );
+      const snapshot = await getDocs(q);
+      const variations = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
     if (variations && variations.length > 0) {
       // Open customization dialog
@@ -358,85 +344,52 @@ export default function PDV() {
         finalDeliveryType = "pickup";
       }
       
-      const { data: orderData, error: orderError } = await supabase
-        .from('orders' as any)
-        .insert([{
-          order_number: orderNumber,
-          delivery_type: finalDeliveryType,
-          table_id: deliveryType === "dine_in" ? selectedTable : null,
-          status: 'new',
-          payment_method: paymentMethod,
-          subtotal: subtotal,
-          service_fee: serviceFee,
-          total: total,
-          customer_name: customerName || null,
-          customer_phone: customerPhone || null,
-        }])
-        .select()
-        .single();
-
-      if (orderError) throw orderError;
-
-      // Adicionar itens do pedido com variações
-      const orderItems = cart.map(item => ({
-        order_id: orderData.id,
-        menu_item_id: item.id,
-        name: item.name,
-        quantity: item.quantity,
-        unit_price: item.finalPrice || item.price,
-        total_price: (item.finalPrice || item.price) * item.quantity,
-        notes: item.customizationsText || null
-      }));
-
-      const { error: itemsError } = await supabase
-        .from('order_items')
-        .insert(orderItems);
-
-      if (itemsError) {
-        console.error('Erro ao inserir itens:', itemsError);
-        throw itemsError;
-      }
-
-      // Mapear método de pagamento
-      const paymentMethodMap: any = {
-        'cash': 'Dinheiro',
-        'credit_card': 'Cartão',
-        'debit_card': 'Cartão',
-        'pix': 'PIX'
+      const newOrder = {
+        order_number: orderNumber,
+        delivery_type: finalDeliveryType,
+        table_id: deliveryType === "dine_in" ? selectedTable : null,
+        status: 'new',
+        payment_method: paymentMethod,
+        subtotal: subtotal,
+        service_fee: serviceFee,
+        total: total,
+        customer_name: customerName || null,
+        customer_phone: customerPhone || null,
+        created_at: new Date(),
+        order_items: cart.map(item => ({
+          menu_item_id: item.id,
+          name: item.name,
+          quantity: item.quantity,
+          unit_price: item.price,
+          total_price: item.finalPrice * item.quantity,
+          notes: item.customizationsText,
+          customizations: item.customizations,
+        })),
       };
 
-      // Registrar movimentação no caixa
-      const { error: cashError } = await db.collection('cash_movements').insert([{
-        type: 'entrada',
-        description: `Pedido ${orderNumber} - ${deliveryType === 'dine_in' ? 'Balcão' : deliveryType === 'online' ? 'Online' : 'Retirada'}`,
-        amount: total,
-        movement_date: new Date().toISOString().split('T')[0],
-        payment_method: paymentMethodMap[paymentMethod] || 'Dinheiro',
-        category: 'Venda',
-        created_by: (await supabase.auth.getUser()).data.user?.id
-      }]);
+      const docRef = await addDoc(collection(db, 'orders'), newOrder);
+      const orderData = { id: docRef.id, ...newOrder };
 
-      if (cashError) {
-        console.error('Erro ao registrar movimentação no caixa:', cashError);
-      }
-
-      // Atualizar pedido para completed
-      await supabase
-        .from('orders')
-        .update({ 
-          status: 'completed',
-          completed_at: new Date().toISOString()
-        })
-        .eq('id', orderData.id);
-
-
-      // Atualizar status da mesa se for pedido no local
+      // Atualizar status da mesa
       if (deliveryType === "dine_in" && selectedTable) {
-        await supabase
-          .from('tables')
-          .update({ status: 'occupied' })
-          .eq('id', selectedTable);
+        await updateDoc(doc(db, 'tables', selectedTable), { status: 'occupied' });
       }
+
+      // Registrar movimentação no caixa
+      await addDoc(collection(db, 'cash_movements'), {
+        type: 'entrada',
+        amount: total,
+        category: 'Venda',
+        description: `Pedido ${orderNumber} - ${deliveryType === 'dine_in' ? 'Balcão' : deliveryType === 'online' ? 'Online' : 'Retirada'}`,
+        payment_method: paymentMethodMap[paymentMethod] || 'Dinheiro',
+        movement_date: new Date().toISOString().split('T')[0],
+        createdAt: new Date()
+      });
+
+// O pedido já foi criado como 'new' e será tratado pelo fluxo normal.
+      // Não é necessário atualizar o status aqui.
+
+      // A atualização da mesa já foi feita no bloco anterior.
 
       toast({
         title: "Pedido finalizado!",

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Users, Plus, Search, Clock, DollarSign, Eye, Printer } from "lucide-react";
 import { db } from "@/lib/firebase";
+import { collection, query, where, getDocs, orderBy, updateDoc, doc } from "firebase/firestore";
 import { toast } from "sonner";
 import { AddComandaDialog } from "@/components/dialogs/AddComandaDialog";
 import { AddItemsToComandaDialog } from "@/components/dialogs/AddItemsToComandaDialog";
@@ -25,35 +26,33 @@ export default function Comandas() {
 
   const loadData = async () => {
     try {
-      // Load orders (comandas) with items
-      const { data: orders, error: ordersError } = await supabase
-        .from('orders' as any)
-        .select(`
-          *,
-          tables(number),
-          order_items(
-            id,
-            name,
-            quantity,
-            unit_price,
-            total_price,
-            notes
-          )
-        `)
-        .eq('delivery_type', 'dine_in')
-        .in('status', ['new', 'confirmed', 'preparing', 'ready'])
-        .order('created_at', { ascending: false });
+      // Load orders (comandas)
+      const ordersQuery = query(
+        collection(db, "orders"),
+        where("delivery_type", "==", "dine_in"),
+        where("status", "in", ["new", "confirmed", "preparing", "ready"]),
+        orderBy("created_at", "desc")
+      );
+      const ordersSnapshot = await getDocs(ordersQuery);
+      const orders = ordersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-      if (ordersError) throw ordersError;
+      // Load tables
+      const tablesQuery = query(collection(db, "tables"), orderBy("number"));
+      const tablesSnapshot = await getDocs(tablesQuery);
+      const tablesData = tablesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-      const { data: tablesData, error: tablesError } = await supabase
-        .from('tables' as any)
-        .select('*')
-        .order('number');
+      // Merge tables data into orders
+      const ordersWithTables = orders.map(order => {
+        const table = tablesData.find(t => t.id === order.table_id);
+        return {
+          ...order,
+          tables: table ? { number: table.number } : null,
+          // Assuming order_items are nested in the order document
+          order_items: order.order_items || [] 
+        };
+      });
 
-      if (tablesError) throw tablesError;
-
-      setComandas(orders || []);
+      setComandas(ordersWithTables || []);
       setTables(tablesData || []);
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
@@ -223,20 +222,14 @@ export default function Comandas() {
                   className="w-full"
                   onClick={async () => {
                     try {
-                      await supabase
-                        .from('orders' as any)
-                        .update({ 
-                          status: 'completed',
-                          completed_at: new Date().toISOString()
-                        })
-                        .eq('id', comanda.id);
+                      await updateDoc(doc(db, "orders", comanda.id), {
+                        status: 'completed',
+                        completed_at: new Date()
+                      });
                       
                       // Liberar mesa
                       if (comanda.table_id) {
-                        await supabase
-                          .from('tables' as any)
-                          .update({ status: 'free' })
-                          .eq('id', comanda.table_id);
+                        await updateDoc(doc(db, "tables", comanda.table_id), { status: 'free' });
                       }
                       
                       toast.success('Comanda fechada!');
