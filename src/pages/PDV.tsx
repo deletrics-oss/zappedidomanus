@@ -197,7 +197,7 @@ export default function PDV() {
         'credit_card': 'Cartão',
         'debit_card': 'Cartão',
  // Registrar movimentação no caixa
-      await addDoc(collection(db, 'cash_movements'), {
+      addDoc(collection(db, 'cash_movements'), {
         type: 'entrada',
         amount: total,
         category: 'Venda',
@@ -376,7 +376,7 @@ export default function PDV() {
       }
 
       // Registrar movimentação no caixa
-      await addDoc(collection(db, 'cash_movements'), {
+      addDoc(collection(db, 'cash_movements'), {
         type: 'entrada',
         amount: total,
         category: 'Venda',
