@@ -1,0 +1,85 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check user role
+    function getUserRole(userId) {
+      return get(/databases/$(database)/documents/userRoles/$(userId)).data.role;
+    }
+    
+    function hasRole(role) {
+      return request.auth != null && getUserRole(request.auth.uid) == role;
+    }
+    
+    function isAdmin() {
+      return hasRole('admin');
+    }
+    
+    function isManager() {
+      return hasRole('manager') || isAdmin();
+    }
+    
+    function isStaff() {
+      return request.auth != null && (
+        hasRole('admin') || 
+        hasRole('manager') || 
+        hasRole('kitchen') || 
+        hasRole('waiter')
+      );
+    }
+    
+    // Profiles - users can only read/write their own profile
+    match /profiles/{profileId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow write: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+    
+    // User Roles - users can read their own role, only admins can modify
+    match /userRoles/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if isAdmin();
+    }
+    
+    // Categories - public read, admin write
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Menu Items - public read, admin write
+    match /menuItems/{itemId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Tables - public read, staff write
+    match /tables/{tableId} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+    
+    // Orders - staff only
+    match /orders/{orderId} {
+      allow read: if isStaff();
+      allow write: if isStaff();
+    }
+    
+    // Order Items - staff only
+    match /orderItems/{itemId} {
+      allow read: if isStaff();
+      allow write: if isStaff();
+    }
+    
+    // Inventory - manager and admin only
+    match /inventory/{itemId} {
+      allow read: if isManager();
+      allow write: if isAdmin();
+    }
+    
+    // Restaurant Settings - manager read, admin write
+    match /restaurantSettings/{settingId} {
+      allow read: if isManager();
+      allow write: if isAdmin();
+    }
+  }
+}
