@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { getDocument, getDocuments, createDocument, updateDocument } from '@/lib/firebase-db';
+import { getDocument, updateDocument } from '@/lib/firebase-db';
 import { useAuth } from '@/hooks/useAuth';
-import { where } from 'firebase/firestore';
 
 type Theme = 'light' | 'dark' | 'system';
 
@@ -67,7 +66,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     
     if (user) {
       // Save to database
-      // No Firestore, usamos setDocument com o ID do usuário para criar/atualizar
+      // No Firestore, usamos updateDocument com o ID do usuário para criar/atualizar
       await updateDocument('userPreferences', user.id, {
         theme: newTheme,
         updatedAt: new Date().toISOString(),
