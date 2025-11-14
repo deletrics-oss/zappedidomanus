@@ -205,7 +205,6 @@ export default function PDV() {
         payment_method: paymentMethodMap[paymentMethod] || 'Dinheiro',
         movement_date: new Date().toISOString().split('T')[0],
         createdAt: new Date()
-      });  });    createdAt: new Date()
       });
 
       sonnerToast.success(`Pedido ${currentOrder.order_number} fechado com sucesso!`);
