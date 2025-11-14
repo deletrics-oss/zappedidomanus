@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -12,10 +11,24 @@ import { Badge } from "@/components/ui/badge";
 import { Trash2, Edit, Plus, Wallet, TrendingDown } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import { getDocuments, createDocument, updateDocument, deleteDocument } from "@/lib/firebase-db";
+import { orderBy } from "firebase/firestore";
+
+interface Expense {
+  id: string;
+  description: string;
+  category: string;
+  amount: number;
+  expenseDate: string;
+  paymentMethod: string;
+  supplierId: string | null;
+  notes: string | null;
+  suppliers?: { name: string };
+}
 
 export default function Despesas() {
   const queryClient = useQueryClient();
-  const [editingExpense, setEditingExpense] = useState<any>(null);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
     description: '',
@@ -30,38 +43,46 @@ export default function Despesas() {
   const { data: expenses = [] } = useQuery({
     queryKey: ['expenses'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('expenses')
-        .select('*, suppliers(name)')
-        .order('expense_date', { ascending: false });
-      if (error) throw error;
-      return data;
+      const docs = await getDocuments('expenses', [orderBy('expenseDate', 'desc')]);
+      
+      // Simular join com suppliers
+      const expensesWithSupplier = await Promise.all(docs.map(async (expense: any) => {
+        if (expense.supplierId) {
+          const supplier = await getDocuments('suppliers', [orderBy('name')]);
+          const supplierData = supplier.find((s: any) => s.id === expense.supplierId);
+          return { ...expense, suppliers: supplierData ? { name: supplierData.name } : null };
+        }
+        return expense;
+      }));
+
+      return expensesWithSupplier as Expense[];
     },
   });
 
   const { data: suppliers = [] } = useQuery({
     queryKey: ['suppliers'],
     queryFn: async () => {
-      const { data, error} = await supabase
-        .from('suppliers')
-        .select('*')
-        .order('name');
-      if (error) throw error;
-      return data;
+      return await getDocuments('suppliers', [orderBy('name')]);
     },
   });
 
   const saveMutation = useMutation({
     mutationFn: async (data: any) => {
+      const expenseData = {
+        description: data.description,
+        category: data.category,
+        amount: parseFloat(data.amount),
+        expenseDate: data.expense_date,
+        paymentMethod: data.payment_method,
+        supplierId: data.supplier_id && data.supplier_id !== 'none' ? data.supplier_id : null,
+        notes: data.notes || null,
+        createdAt: new Date().toISOString(),
+      };
+
       if (editingExpense) {
-        const { error } = await supabase
-          .from('expenses')
-          .update(data)
-          .eq('id', editingExpense.id);
-        if (error) throw error;
+        await updateDocument('expenses', editingExpense.id, expenseData);
       } else {
-        const { error } = await db.collection('expenses').insert([data]);
-        if (error) throw error;
+        await createDocument('expenses', expenseData);
       }
     },
     onSuccess: () => {
@@ -69,41 +90,40 @@ export default function Despesas() {
       toast.success(editingExpense ? "Despesa atualizada!" : "Despesa cadastrada!");
       resetForm();
     },
+    onError: (error) => {
+      console.error("Erro ao salvar despesa:", error);
+      toast.error("Erro ao salvar despesa.");
+    }
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await db.collection('expenses').delete().eq('id', id);
-      if (error) throw error;
+      await deleteDocument('expenses', id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       toast.success("Despesa removida!");
     },
+    onError: (error) => {
+      console.error("Erro ao deletar despesa:", error);
+      toast.error("Erro ao deletar despesa.");
+    }
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    saveMutation.mutate({
-      description: formData.description,
-      category: formData.category,
-      amount: parseFloat(formData.amount),
-      expense_date: formData.expense_date,
-      payment_method: formData.payment_method,
-      supplier_id: formData.supplier_id && formData.supplier_id !== 'none' ? formData.supplier_id : null,
-      notes: formData.notes || null
-    });
+    saveMutation.mutate(formData);
   };
 
-  const handleEdit = (expense: any) => {
+  const handleEdit = (expense: Expense) => {
     setEditingExpense(expense);
     setFormData({
       description: expense.description,
       category: expense.category,
       amount: expense.amount.toString(),
-      expense_date: expense.expense_date,
-      payment_method: expense.payment_method,
-      supplier_id: expense.supplier_id || 'none',
+      expense_date: expense.expenseDate,
+      payment_method: expense.paymentMethod,
+      supplier_id: expense.supplierId || 'none',
       notes: expense.notes || ''
     });
     setShowForm(true);
@@ -129,7 +149,7 @@ export default function Despesas() {
     setShowForm(false);
   };
 
-  const totalExpenses = expenses.reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
+  const totalExpenses = expenses.reduce((sum: number, e: Expense) => sum + (e.amount || 0), 0);
 
   return (
     <div className="min-h-screen bg-background p-8">
@@ -308,9 +328,9 @@ export default function Despesas() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {expenses.map((expense: any) => (
+              {expenses.map((expense: Expense) => (
                 <TableRow key={expense.id}>
-                  <TableCell>{format(new Date(expense.expense_date), 'dd/MM/yyyy')}</TableCell>
+                  <TableCell>{format(new Date(expense.expenseDate), 'dd/MM/yyyy')}</TableCell>
                   <TableCell>
                     <div>
                       <p className="font-medium">{expense.description}</p>
@@ -322,7 +342,7 @@ export default function Despesas() {
                   </TableCell>
                   <TableCell>{expense.suppliers?.name || '-'}</TableCell>
                   <TableCell className="text-red-600 font-medium">R$ {expense.amount.toFixed(2)}</TableCell>
-                  <TableCell>{expense.payment_method}</TableCell>
+                  <TableCell>{expense.paymentMethod}</TableCell>
                   <TableCell>
                     <div className="flex gap-2">
                       <Button variant="outline" size="sm" onClick={() => handleEdit(expense)}>
