@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/firebase-db';
 import { useAuth } from '@/hooks/useAuth';
 
 type Theme = 'light' | 'dark' | 'system';

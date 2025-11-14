@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,14 +13,16 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Upload, Play, Trash2, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { getDocuments, createDocument, updateDocument, deleteDocument } from '@/lib/firebase-db';
+import { orderBy } from 'firebase/firestore';
 
 interface AudioAlert {
   id: string;
   name: string;
   description: string | null;
-  audio_url: string | null;
-  trigger_event: string;
-  is_active: boolean;
+  audioUrl: string | null; // Alterado para camelCase
+  triggerEvent: string; // Alterado para camelCase
+  isActive: boolean; // Alterado para camelCase
 }
 
 const eventOptions = [
@@ -41,9 +42,9 @@ export function AudioManager() {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    trigger_event: '',
-    audio_url: '',
-    is_active: true,
+    triggerEvent: '', // Alterado para camelCase
+    audioUrl: '', // Alterado para camelCase
+    isActive: true, // Alterado para camelCase
   });
 
   useEffect(() => {
@@ -52,13 +53,20 @@ export function AudioManager() {
 
   const fetchAudioAlerts = async () => {
     try {
-      const { data, error } = await supabase
-        .from('audio_alerts')
-        .select('*')
-        .order('created_at', { ascending: true });
+      // Usando getDocuments com orderBy
+      const data = await getDocuments('audioAlerts', [orderBy('createdAt', 'asc')]);
+      
+      // Conversão de snake_case para camelCase (se necessário, mas o Firestore usa o que definimos)
+      const alerts = data.map(item => ({
+        id: item.id,
+        name: item.name,
+        description: item.description || null,
+        audioUrl: item.audioUrl || null,
+        triggerEvent: item.triggerEvent,
+        isActive: item.isActive,
+      })) as AudioAlert[];
 
-      if (error) throw error;
-      setAudioAlerts(data || []);
+      setAudioAlerts(alerts);
     } catch (error) {
       console.error('Error fetching audio alerts:', error);
       toast.error('Erro ao carregar alertas sonoros');
@@ -71,42 +79,49 @@ export function AudioManager() {
     const event = eventOptions.find(e => e.value === eventValue);
     setFormData({ 
       ...formData, 
-      trigger_event: eventValue,
-      audio_url: event?.defaultAudio || formData.audio_url,
+      triggerEvent: eventValue,
+      audioUrl: event?.defaultAudio || formData.audioUrl,
       name: event?.label || formData.name,
     });
   };
 
   const handleSave = async () => {
-    if (!formData.name || !formData.trigger_event) {
+    if (!formData.name || !formData.triggerEvent) {
       toast.error('Nome e tipo de evento são obrigatórios');
       return;
     }
 
     try {
       if (editingId) {
-        const { error } = await supabase
-          .from('audio_alerts')
-          .update(formData)
-          .eq('id', editingId);
+        // Usando updateDocument
+        await updateDocument('audioAlerts', editingId, {
+          name: formData.name,
+          description: formData.description,
+          triggerEvent: formData.triggerEvent,
+          audioUrl: formData.audioUrl,
+          isActive: formData.isActive,
+        });
 
-        if (error) throw error;
         toast.success('Alerta sonoro atualizado!');
       } else {
-        const { error } = await supabase
-          .from('audio_alerts')
-          .insert([formData]);
+        // Usando createDocument
+        await createDocument('audioAlerts', {
+          name: formData.name,
+          description: formData.description,
+          triggerEvent: formData.triggerEvent,
+          audioUrl: formData.audioUrl,
+          isActive: formData.isActive,
+        });
 
-        if (error) throw error;
         toast.success('Alerta sonoro criado!');
       }
 
       setFormData({
         name: '',
         description: '',
-        trigger_event: '',
-        audio_url: '',
-        is_active: true,
+        triggerEvent: '',
+        audioUrl: '',
+        isActive: true,
       });
       setEditingId(null);
       fetchAudioAlerts();
@@ -120,12 +135,9 @@ export function AudioManager() {
     if (!confirm('Deseja excluir este alerta sonoro?')) return;
 
     try {
-      const { error } = await supabase
-        .from('audio_alerts')
-        .delete()
-        .eq('id', id);
+      // Usando deleteDocument
+      await deleteDocument('audioAlerts', id);
 
-      if (error) throw error;
       toast.success('Alerta sonoro excluído!');
       fetchAudioAlerts();
     } catch (error) {
@@ -136,12 +148,9 @@ export function AudioManager() {
 
   const handleToggle = async (id: string, isActive: boolean) => {
     try {
-      const { error } = await supabase
-        .from('audio_alerts')
-        .update({ is_active: isActive })
-        .eq('id', id);
+      // Usando updateDocument
+      await updateDocument('audioAlerts', id, { isActive: isActive });
 
-      if (error) throw error;
       fetchAudioAlerts();
       toast.success(isActive ? 'Alerta ativado' : 'Alerta desativado');
     } catch (error) {
@@ -180,9 +189,9 @@ export function AudioManager() {
 
         <div className="grid gap-4">
           <div className="space-y-2">
-            <Label htmlFor="trigger_event">Tipo de Evento *</Label>
+            <Label htmlFor="triggerEvent">Tipo de Evento *</Label>
             <Select
-              value={formData.trigger_event}
+              value={formData.triggerEvent}
               onValueChange={handleEventChange}
             >
               <SelectTrigger>
@@ -219,19 +228,19 @@ export function AudioManager() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="audio_url">URL/Caminho do Áudio</Label>
+            <Label htmlFor="audioUrl">URL/Caminho do Áudio</Label>
             <div className="flex gap-2">
               <Input
-                id="audio_url"
-                value={formData.audio_url}
-                onChange={(e) => setFormData({ ...formData, audio_url: e.target.value })}
+                id="audioUrl"
+                value={formData.audioUrl}
+                onChange={(e) => setFormData({ ...formData, audioUrl: e.audioUrl })}
                 placeholder="/audios/novopedido.mp3"
               />
               <Button
                 variant="outline"
                 size="icon"
-                onClick={() => playAudio(formData.audio_url)}
-                disabled={!formData.audio_url}
+                onClick={() => playAudio(formData.audioUrl)}
+                disabled={!formData.audioUrl}
               >
                 <Play className="h-4 w-4" />
               </Button>
@@ -243,11 +252,11 @@ export function AudioManager() {
 
           <div className="flex items-center space-x-2">
             <Switch
-              id="is_active"
-              checked={formData.is_active}
-              onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
+              id="isActive"
+              checked={formData.isActive}
+              onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
             />
-            <Label htmlFor="is_active">Alerta ativo</Label>
+            <Label htmlFor="isActive">Alerta ativo</Label>
           </div>
 
           <div className="flex gap-2">
@@ -263,9 +272,9 @@ export function AudioManager() {
                   setFormData({
                     name: '',
                     description: '',
-                    trigger_event: '',
-                    audio_url: '',
-                    is_active: true,
+                    triggerEvent: '',
+                    audioUrl: '',
+                    isActive: true,
                   });
                 }}
               >
@@ -290,28 +299,28 @@ export function AudioManager() {
                   <div className="flex items-center gap-2">
                     <h4 className="font-semibold">{alert.name}</h4>
                     <span className="text-xs bg-muted px-2 py-1 rounded">
-                      {eventOptions.find((e) => e.value === alert.trigger_event)?.label}
+                      {eventOptions.find((e) => e.value === alert.triggerEvent)?.label}
                     </span>
                   </div>
                   {alert.description && (
                     <p className="text-sm text-muted-foreground mt-1">{alert.description}</p>
                   )}
-                  {alert.audio_url && (
+                  {alert.audioUrl && (
                     <p className="text-xs text-muted-foreground mt-1 truncate">
-                      {alert.audio_url}
+                      {alert.audioUrl}
                     </p>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
                   <Switch
-                    checked={alert.is_active}
+                    checked={alert.isActive}
                     onCheckedChange={(checked) => handleToggle(alert.id, checked)}
                   />
-                  {alert.audio_url && (
+                  {alert.audioUrl && (
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => playAudio(alert.audio_url!)}
+                      onClick={() => playAudio(alert.audioUrl!)}
                     >
                       <Play className="h-4 w-4" />
                     </Button>
@@ -324,9 +333,9 @@ export function AudioManager() {
                       setFormData({
                         name: alert.name,
                         description: alert.description || '',
-                        trigger_event: alert.trigger_event,
-                        audio_url: alert.audio_url || '',
-                        is_active: alert.is_active,
+                        triggerEvent: alert.triggerEvent,
+                        audioUrl: alert.audioUrl || '',
+                        isActive: alert.isActive,
                       });
                     }}
                   >
