@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/firebase-db';
+import { db } from '@/lib/firebase-db';
 import { toast } from 'sonner';
 
 export function useOrderNotifications(customerPhone: string) {

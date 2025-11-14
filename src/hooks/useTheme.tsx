@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { supabase } from '@/lib/firebase-db';
+import { getDocument, getDocuments, createDocument, updateDocument } from '@/lib/firebase-db';
 import { useAuth } from '@/hooks/useAuth';
+import { where } from 'firebase/firestore';
 
 type Theme = 'light' | 'dark' | 'system';
 
@@ -22,14 +23,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (!user) return;
 
     const loadTheme = async () => {
-      const { data } = await supabase
-        .from('user_preferences')
-        .select('theme')
-        .eq('user_id', user.id)
-        .single();
+      // No Firestore, a preferência do usuário deve ser um documento na coleção 'userPreferences'
+      // com o ID do documento sendo o user.id
+      const preference = await getDocument('userPreferences', user.id);
 
-      if (data?.theme) {
-        setThemeState(data.theme as Theme);
+      if (preference?.theme) {
+        setThemeState(preference.theme as Theme);
       }
     };
 
@@ -68,22 +67,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     
     if (user) {
       // Save to database
-      const { data: existing } = await supabase
-        .from('user_preferences')
-        .select('id')
-        .eq('user_id', user.id)
-        .single();
-
-      if (existing) {
-        await supabase
-          .from('user_preferences')
-          .update({ theme: newTheme })
-          .eq('user_id', user.id);
-      } else {
-        await supabase
-          .from('user_preferences')
-          .insert({ user_id: user.id, theme: newTheme });
-      }
+      // No Firestore, usamos setDocument com o ID do usuário para criar/atualizar
+      await updateDocument('userPreferences', user.id, {
+        theme: newTheme,
+        updatedAt: new Date().toISOString(),
+      }, true); // O 'true' indica que é um set/merge
     }
   };
 

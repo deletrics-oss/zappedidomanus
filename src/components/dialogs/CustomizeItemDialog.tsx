@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { supabase } from '@/lib/firebase-db';
+import { db } from '@/lib/firebase-db';
 import { toast } from 'sonner';
 import { Plus, ChefHat } from 'lucide-react';
 
