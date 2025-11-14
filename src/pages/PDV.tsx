@@ -188,7 +188,7 @@ export default function PDV() {
       // Liberar mesa se for pedido no local
       if (currentOrder.table_id) {
         const tableRef = doc(db, 'tables', currentOrder.table_id);
-      await updateDoc(tableRef, { status: 'free' });
+        await updateDoc(tableRef, { status: 'free' });
       }
 
       // Registrar entrada no caixa
@@ -196,12 +196,17 @@ export default function PDV() {
         'cash': 'Dinheiro',
         'credit_card': 'Cartão',
         'debit_card': 'Cartão',
- // Registrar movimentação no caixa
-      addDoc(collection(db, 'cash_movements'), {
+      }; // <-- FECHAMENTO DO OBJETO ADICIONADO AQUI
+
+      // A função addDoc deve ser chamada com await se estiver dentro de um bloco try/catch
+      // e se quisermos garantir que a operação termine antes de prosseguir.
+      // Como o erro original era de sintaxe, e não de await, vou manter o await.
+      // As variáveis total e orderNumber são acessadas via currentOrder.
+      await addDoc(collection(db, 'cash_movements'), {
         type: 'entrada',
-        amount: total,
+        amount: currentOrder.total, // CORRIGIDO: Usando currentOrder.total
         category: 'Venda',
-        description: `Pedido ${orderNumber}`,
+        description: `Pedido ${currentOrder.order_number}`, // CORRIGIDO: Usando currentOrder.order_number
         payment_method: paymentMethodMap[paymentMethod] || 'Dinheiro',
         movement_date: new Date().toISOString().split('T')[0],
         createdAt: new Date()
@@ -293,21 +298,30 @@ export default function PDV() {
   };
 
   const removeFromCart = (id: string) => {
-    setCart(cart.filter((item) => item.id !== id));
+    setCart((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const subtotal = cart.reduce((sum, item) => {
-    const price = item.finalPrice || item.price;
-    return sum + price * item.quantity;
-  }, 0);
+  const clearCart = () => {
+    setCart([]);
+    setCustomerName("");
+    setCustomerPhone("");
+    setSelectedTable("");
+    setDeliveryType("dine_in");
+  };
+
+  const subtotal = cart.reduce(
+    (sum, item) => sum + (item.finalPrice || item.price) * item.quantity,
+    0
+  );
+
   const serviceFee = includeServiceFee ? subtotal * 0.1 : 0;
   const total = subtotal + serviceFee;
 
-  const handleFinishOrder = async () => {
+  const handleCreateOrder = async () => {
     if (cart.length === 0) {
       toast({
         title: "Carrinho vazio",
-        description: "Adicione itens ao pedido antes de finalizar",
+        description: "Adicione itens ao carrinho antes de criar um pedido.",
         variant: "destructive",
       });
       return;
@@ -315,660 +329,628 @@ export default function PDV() {
 
     if (deliveryType === "dine_in" && !selectedTable) {
       toast({
-        title: "Mesa obrigatória",
-        description: "Selecione uma mesa para pedido no local",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if ((deliveryType === "online" || deliveryType === "delivery") && !customerPhone) {
-      toast({
-        title: "Telefone obrigatório",
-        description: "Informe o telefone do cliente para pedidos online/entrega",
+        title: "Mesa não selecionada",
+        description: "Selecione uma mesa para pedidos no local.",
         variant: "destructive",
       });
       return;
     }
 
     try {
-      // Criar pedido - CORRIGIDO: validar delivery_type
-      const orderNumber = `PDV${Date.now().toString().slice(-6)}`;
-      
-      // Mapear delivery_type corretamente
-      let finalDeliveryType: 'delivery' | 'pickup' | 'dine_in' = 'dine_in';
-      if (deliveryType === "online" || deliveryType === "delivery") {
-        finalDeliveryType = "delivery";
-      } else if (deliveryType === "pickup") {
-        finalDeliveryType = "pickup";
-      }
-      
+      // 1. Criar o pedido principal
       const newOrder = {
-        order_number: orderNumber,
-        delivery_type: finalDeliveryType,
-        table_id: deliveryType === "dine_in" ? selectedTable : null,
-        status: 'new',
-        payment_method: paymentMethod,
-        subtotal: subtotal,
-        service_fee: serviceFee,
-        total: total,
+        order_number: Date.now().toString().slice(-6), // Simples número de pedido
         customer_name: customerName || null,
         customer_phone: customerPhone || null,
-        created_at: new Date(),
-        order_items: cart.map(item => ({
-          menu_item_id: item.id,
-          name: item.name,
-          quantity: item.quantity,
-          unit_price: item.price,
-          total_price: item.finalPrice * item.quantity,
-          notes: item.customizationsText,
-          customizations: item.customizations,
-        })),
-      };
-
-      const docRef = await addDoc(collection(db, 'orders'), newOrder);
-      const orderData = { id: docRef.id, ...newOrder };
-
-      // Atualizar status da mesa
-      if (deliveryType === "dine_in" && selectedTable) {
-        await updateDoc(doc(db, 'tables', selectedTable), { status: 'occupied' });
-      }
-
-      // Registrar movimentação no caixa
-      addDoc(collection(db, 'cash_movements'), {
-        type: 'entrada',
-        amount: total,
-        category: 'Venda',
-        description: `Pedido ${orderNumber} - ${deliveryType === 'dine_in' ? 'Balcão' : deliveryType === 'online' ? 'Online' : 'Retirada'}`,
-        payment_method: paymentMethodMap[paymentMethod] || 'Dinheiro',
-        movement_date: new Date().toISOString().split('T')[0],
-        createdAt: new Date()
-      });
-
-// O pedido já foi criado como 'new' e será tratado pelo fluxo normal.
-      // Não é necessário atualizar o status aqui.
-
-      // A atualização da mesa já foi feita no bloco anterior.
-
-      toast({
-        title: "Pedido finalizado!",
-        description: `Pedido ${orderNumber} criado com sucesso`,
-      });
-
-      // Preparar dados para impressão
-      const orderForPrint = {
-        order_number: orderNumber,
-        created_at: new Date().toISOString(),
         delivery_type: deliveryType,
-        customer_name: customerName,
-        customer_phone: customerPhone,
+        status: 'new',
+        table_id: selectedTable || null,
         subtotal: subtotal,
         service_fee: serviceFee,
+        discount: 0,
         total: total,
         payment_method: paymentMethod,
+        delivery_address: null,
         notes: null,
-        order_items: cart.map(item => ({
-          name: item.name,
-          quantity: item.quantity,
-          unit_price: item.price,
-          total_price: item.price * item.quantity
-        }))
+        created_at: new Date(),
+        updated_at: new Date(),
       };
 
-      // Imprimir recibo apenas se checkbox estiver marcado
-      if (shouldPrint) {
-        const tableNum = deliveryType === "dine_in" && selectedTable 
-          ? tables.find(t => t.id === selectedTable)?.number 
-          : undefined;
-        generatePrintReceipt(orderForPrint, restaurantName, tableNum, 'customer');
+      const orderRef = await addDoc(collection(db, 'orders'), newOrder);
+      const orderId = orderRef.id;
+
+      // 2. Adicionar os itens do pedido
+      const orderItems = cart.map(item => ({
+        order_id: orderId,
+        menu_item_id: item.id,
+        name: item.name + (item.customizationsText ? ` (${item.customizationsText})` : ''),
+        quantity: item.quantity,
+        unit_price: item.finalPrice || item.price,
+        total_price: (item.finalPrice || item.price) * item.quantity,
+        notes: item.customizationsText || null,
+        created_at: new Date(),
+      }));
+
+      // Adicionar itens em lote (melhor performance)
+      const batch = db.batch();
+      orderItems.forEach(item => {
+        const itemRef = doc(collection(db, 'order_items'));
+        batch.set(itemRef, item);
+      });
+      await batch.commit();
+
+      // 3. Atualizar status da mesa (se for dine_in)
+      if (selectedTable) {
+        const tableRef = doc(db, 'tables', selectedTable);
+        await updateDoc(tableRef, { status: 'occupied' });
       }
 
-      // Limpar formulário
-      setCart([]);
-      setSelectedTable("");
-      setCustomerName("");
-      setCustomerPhone("");
-      setShouldPrint(true);
-      setDeliveryType("dine_in");
+      // 4. Limpar carrinho e notificar
+      clearCart();
+      loadPendingOrders();
       loadTables();
+      sonnerToast.success(`Pedido ${newOrder.order_number} criado com sucesso!`);
+
+      // 5. Imprimir pedido para a cozinha
+      if (shouldPrint) {
+        const tableNum = tables.find(t => t.id === selectedTable)?.number;
+        generatePrintReceipt({ ...newOrder, id: orderId, order_items: orderItems }, restaurantName, tableNum, 'kitchen');
+      }
+
     } catch (error) {
       console.error('Erro ao criar pedido:', error);
       toast({
         title: "Erro ao criar pedido",
-        description: "Tente novamente",
+        description: "Não foi possível finalizar o pedido. Verifique o console para mais detalhes.",
         variant: "destructive",
       });
     }
   };
 
+  const handleUpdateOrder = async () => {
+    if (!currentOrder) return;
+
+    try {
+      // 1. Atualizar o pedido principal
+      const orderRef = doc(db, 'orders', currentOrder.id);
+      await updateDoc(orderRef, {
+        customer_name: customerName || null,
+        customer_phone: customerPhone || null,
+        delivery_type: deliveryType,
+        table_id: selectedTable || null,
+        subtotal: subtotal,
+        service_fee: serviceFee,
+        total: total,
+        payment_method: paymentMethod,
+        updated_at: new Date(),
+      });
+
+      // 2. Remover itens antigos e adicionar novos (simplificação)
+      // Em um cenário real, seria melhor comparar e atualizar, mas para este exemplo, vamos simplificar.
+      
+      // Remover itens antigos (se houver)
+      const oldItemsQuery = query(collection(db, 'order_items'), where('order_id', '==', currentOrder.id));
+      const oldItemsSnapshot = await getDocs(oldItemsQuery);
+      
+      const deleteBatch = db.batch();
+      oldItemsSnapshot.docs.forEach(doc => {
+        deleteBatch.delete(doc.ref);
+      });
+      await deleteBatch.commit();
+
+      // Adicionar novos itens
+      const orderItems = cart.map(item => ({
+        order_id: currentOrder.id,
+        menu_item_id: item.id,
+        name: item.name + (item.customizationsText ? ` (${item.customizationsText})` : ''),
+        quantity: item.quantity,
+        unit_price: item.finalPrice || item.price,
+        total_price: (item.finalPrice || item.price) * item.quantity,
+        notes: item.customizationsText || null,
+        created_at: new Date(),
+      }));
+
+      const addBatch = db.batch();
+      orderItems.forEach(item => {
+        const itemRef = doc(collection(db, 'order_items'));
+        addBatch.set(itemRef, item);
+      });
+      await addBatch.commit();
+
+      // 3. Limpar carrinho e notificar
+      clearCart();
+      setCurrentOrder(null);
+      loadPendingOrders();
+      sonnerToast.success(`Pedido ${currentOrder.order_number} atualizado com sucesso!`);
+
+    } catch (error) {
+      console.error('Erro ao atualizar pedido:', error);
+      toast({
+        title: "Erro ao atualizar pedido",
+        description: "Não foi possível atualizar o pedido. Verifique o console para mais detalhes.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCancelOrder = async () => {
+    if (!currentOrder) return;
+
+    try {
+      // 1. Atualizar pedido como cancelado
+      const orderRef = doc(db, 'orders', currentOrder.id);
+      await updateDoc(orderRef, { 
+        status: 'cancelled',
+        updated_at: new Date()
+      });
+
+      // 2. Liberar mesa (se aplicável)
+      if (currentOrder.table_id) {
+        const tableRef = doc(db, 'tables', currentOrder.table_id);
+        await updateDoc(tableRef, { status: 'free' });
+      }
+
+      // 3. Limpar e notificar
+      clearCart();
+      setCurrentOrder(null);
+      loadPendingOrders();
+      loadTables();
+      sonnerToast.info(`Pedido ${currentOrder.order_number} cancelado.`);
+
+    } catch (error) {
+      console.error('Erro ao cancelar pedido:', error);
+      sonnerToast.error('Erro ao cancelar pedido');
+    }
+  };
+
+  const handleLoadOrderToCart = async (order: any) => {
+    try {
+      // 1. Carregar itens do pedido
+      const itemsQuery = query(collection(db, 'order_items'), where('order_id', '==', order.id));
+      const itemsSnapshot = await getDocs(itemsQuery);
+      const orderItems = itemsSnapshot.docs.map(doc => doc.data());
+
+      // 2. Mapear para o formato do carrinho
+      const newCart: CartItem[] = orderItems.map(item => ({
+        id: item.menu_item_id,
+        name: item.name,
+        price: item.unit_price,
+        quantity: item.quantity,
+        customizations: [], // Simplificado, assumindo que as customizações estão no nome/notes
+        finalPrice: item.unit_price,
+        customizationsText: item.notes,
+      }));
+
+      // 3. Atualizar estados
+      setCart(newCart);
+      setCurrentOrder(order);
+      setCustomerName(order.customer_name || '');
+      setCustomerPhone(order.customer_phone || '');
+      setSelectedTable(order.table_id || '');
+      setDeliveryType(order.delivery_type);
+      setPaymentMethod(order.payment_method);
+      setIncludeServiceFee(order.service_fee > 0);
+      setActiveTab('new');
+
+      sonnerToast.info(`Pedido ${order.order_number} carregado para edição.`);
+
+    } catch (error) {
+      console.error('Erro ao carregar pedido para edição:', error);
+      sonnerToast.error('Erro ao carregar pedido para edição');
+    }
+  };
+
+  const handleCustomizeItem = (item: MenuItem) => {
+    setSelectedItem(item);
+    setCustomizeDialogOpen(true);
+  };
+
+  const handleSaveCustomization = (item: MenuItem, customizations: any[]) => {
+    addToCart(item, customizations);
+    setCustomizeDialogOpen(false);
+    setSelectedItem(null);
+  };
+
+  const getTableNumber = (tableId: string) => {
+    return tables.find(t => t.id === tableId)?.number || 'N/A';
+  };
+
   return (
-    <div className="min-h-screen bg-background p-8">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">PDV - Ponto de Venda</h1>
-        <p className="text-muted-foreground">Crie pedidos e finalize fechamentos</p>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        <div className="lg:col-span-2">
-          <Tabs value={selectedCategory} onValueChange={setSelectedCategory} className="w-full">
-            <TabsList className="mb-4">
-              <TabsTrigger value="all">Todos</TabsTrigger>
-              {categories.map((cat) => (
-                <TabsTrigger key={cat.id} value={cat.id}>
-                  {cat.name}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-
-            <TabsContent value={selectedCategory}>
-              <div className="grid gap-3 grid-cols-2 md:grid-cols-3">
-                {filteredItems.map((item) => (
-                  <Card
-                    key={item.id}
-                    className="p-4 hover:shadow-lg transition-shadow cursor-pointer"
-                    onClick={() => handleAddToCart(item)}
-                  >
-                    {item.image_url && (
-                      <img
-                        src={item.image_url}
-                        alt={item.name}
-                        className="w-full h-24 object-cover rounded-md mb-2"
-                      />
-                    )}
-                    <h3 className="font-semibold text-sm mb-1">{item.name}</h3>
-                    {item.description && (
-                      <p className="text-xs text-muted-foreground mb-2 line-clamp-2">
-                        {item.description}
-                      </p>
-                    )}
-                    <div className="flex items-center justify-between">
-                      {item.promotional_price ? (
-                        <div className="flex flex-col">
-                          <span className="text-lg font-bold text-green-600">
-                            R$ {item.promotional_price.toFixed(2)}
-                          </span>
-                          <span className="text-xs text-muted-foreground line-through">
-                            R$ {item.price.toFixed(2)}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-lg font-bold">
-                          R$ {item.price.toFixed(2)}
-                        </span>
-                      )}
-                      <Button size="sm" variant="secondary">
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            </TabsContent>
-          </Tabs>
-        </div>
-
-        <div className="lg:col-span-1">
-          <Card className="p-6 sticky top-8">
-            <div className="flex items-center gap-2 mb-4">
-              <ShoppingCart className="h-5 w-5" />
-              <h2 className="text-xl font-bold">Pedido Atual</h2>
-            </div>
-
-            <div className="space-y-2 mb-4">
-              <Label>Tipo de Pedido</Label>
-              <Select value={deliveryType} onValueChange={(v: any) => setDeliveryType(v)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="dine_in">Mesa (Consumo no Local)</SelectItem>
-                  <SelectItem value="counter">Balcão</SelectItem>
-                  <SelectItem value="online">Pedido Online (WhatsApp/Web)</SelectItem>
-                  <SelectItem value="delivery">Entrega</SelectItem>
-                  <SelectItem value="pickup">Retirada</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {deliveryType === "dine_in" && (
-              <div className="space-y-2 mb-4">
-                <Label>Selecione a Mesa</Label>
-                <Select value={selectedTable} onValueChange={setSelectedTable}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione uma mesa" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {tables
-                      .filter(t => t.status === 'free')
-                      .map((table) => (
-                        <SelectItem key={table.id} value={table.id}>
-                          Mesa {table.number}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                {tables.filter(t => t.status === 'free').length === 0 && (
-                  <p className="text-xs text-muted-foreground">Nenhuma mesa disponível</p>
-                )}
-              </div>
-            )}
-
-            {(deliveryType === "online" || deliveryType === "delivery") && (
-              <div className="space-y-4 mb-4">
-                <div className="space-y-2">
-                  <Label>Nome do Cliente</Label>
-                  <Input
-                    placeholder="Nome do cliente"
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Telefone *</Label>
-                  <Input
-                    placeholder="(00) 00000-0000"
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-2 mb-4">
-              <Label>Forma de Pagamento</Label>
-              <RadioGroup value={paymentMethod} onValueChange={(v: any) => setPaymentMethod(v)}>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="cash" id="cash" />
-                  <Label htmlFor="cash">Dinheiro</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="credit_card" id="credit_card" />
-                  <Label htmlFor="credit_card">Cartão de Crédito</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="debit_card" id="debit_card" />
-                  <Label htmlFor="debit_card">Cartão de Débito</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="pix" id="pix" />
-                  <Label htmlFor="pix">PIX</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="border-t pt-4 mb-4 max-h-[300px] overflow-y-auto">
-              {cart.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">
-                  Carrinho vazio
-                </p>
-              ) : (
-                cart.map((item) => (
-                  <div key={item.id} className="flex items-center gap-2 mb-3 pb-3 border-b">
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{item.name}</p>
-                    {item.customizationsText && (
-                      <p className="text-xs text-muted-foreground">+ {item.customizationsText}</p>
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      R$ {(item.finalPrice || item.price).toFixed(2)}
-                    </p>
-                  </div>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        className="h-7 w-7"
-                        onClick={() => updateQuantity(item.id, -1)}
-                      >
-                        <Minus className="h-3 w-3" />
-                      </Button>
-                      <span className="w-8 text-center text-sm font-medium">
-                        {item.quantity}
-                      </span>
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        className="h-7 w-7"
-                        onClick={() => updateQuantity(item.id, 1)}
-                      >
-                        <Plus className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-destructive"
-                        onClick={() => removeFromCart(item.id)}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                    <p className="text-sm font-bold w-20 text-right">
-                      R$ {((item.finalPrice || item.price) * item.quantity).toFixed(2)}
-                    </p>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="border-t pt-4">
-              <div className="space-y-2 mb-4">
-                <div className="flex justify-between text-sm">
-                  <span>Subtotal:</span>
-                  <span>R$ {subtotal.toFixed(2)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={includeServiceFee}
-                      onChange={(e) => setIncludeServiceFee(e.target.checked)}
-                      className="rounded"
-                    />
-                    Taxa de serviço 10%
-                  </label>
-                  {includeServiceFee && (
-                    <span className="text-sm">R$ {serviceFee.toFixed(2)}</span>
-                  )}
-                </div>
-              </div>
-              <div className="flex justify-between items-center mb-4 border-t pt-4">
-                <span className="text-lg font-semibold">Total:</span>
-                <span className="text-2xl font-bold text-green-600">R$ {total.toFixed(2)}</span>
-              </div>
-              <div className="flex items-center gap-2 mb-3">
-                <input
-                  type="checkbox"
-                  id="shouldPrint"
-                  checked={shouldPrint}
-                  onChange={(e) => setShouldPrint(e.target.checked)}
-                  className="rounded"
-                />
-                <Label htmlFor="shouldPrint" className="cursor-pointer text-sm">
-                  Imprimir recibo ao finalizar
-                </Label>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  className="flex-1 gap-2"
-                  size="lg"
-                  onClick={handleFinishOrder}
-                  disabled={cart.length === 0}
-                >
-                  <DollarSign className="h-5 w-5" />
-                  Finalizar Pedido
-                </Button>
-              </div>
-            </div>
-          </Card>
-        </div>
-      </div>
-
-      {/* Pedido Atual no Caixa */}
-      {currentOrder && (
-        <div className="mb-8">
-          <div className="flex items-center gap-2 mb-4">
-            <ShoppingCart className="h-6 w-6" />
-            <h2 className="text-2xl font-bold">Pedido Atual no Caixa</h2>
-          </div>
-          
-          <Card className="p-6 border-2 border-primary">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <h3 className="font-bold text-2xl">#{currentOrder.order_number}</h3>
-                <p className="text-sm text-muted-foreground">
-                  {new Date(currentOrder.created_at).toLocaleString('pt-BR')}
-                </p>
-                {currentOrder.tables && (
-                  <Badge variant="outline" className="mt-2">
-                    Mesa {currentOrder.tables.number}
-                  </Badge>
-                )}
-              </div>
-              <Badge variant="default" className="text-lg px-4 py-2">
-                {currentOrder.delivery_type === 'online' && '🌐 Online'}
-                {currentOrder.delivery_type === 'delivery' && '🚚 Entrega'}
-                {currentOrder.delivery_type === 'pickup' && '🏪 Retirada'}
-                {currentOrder.delivery_type === 'dine_in' && '🍽️ Local'}
-                {currentOrder.delivery_type === 'counter' && '🏪 Balcão'}
-              </Badge>
-            </div>
-
-            {currentOrder.customer_name && (
-              <p className="text-sm mb-2">
-                <strong>Cliente:</strong> {currentOrder.customer_name}
-              </p>
-            )}
-
-            {currentOrder.customer_phone && (
-              <p className="text-sm mb-4">
-                <strong>Telefone:</strong> {currentOrder.customer_phone}
-              </p>
-            )}
-
-            <div className="bg-muted/50 rounded-lg p-4 mb-4">
-              <p className="font-semibold mb-3">Itens do pedido:</p>
-              <div className="space-y-2">
-                {currentOrder.order_items && currentOrder.order_items.length > 0 ? (
-                  currentOrder.order_items.map((item: any) => (
-                    <div key={item.id} className="flex justify-between py-2 border-b last:border-0">
-                      <div>
-                        <p className="font-medium">{item.quantity}x {item.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          R$ {item.unit_price.toFixed(2)} cada
-                        </p>
-                      </div>
-                      <span className="font-bold">R$ {item.total_price.toFixed(2)}</span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-muted-foreground italic">Sem itens</p>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-2 mb-4">
-              <div className="flex justify-between">
-                <span>Subtotal:</span>
-                <span>R$ {currentOrder.subtotal.toFixed(2)}</span>
-              </div>
-              {currentOrder.service_fee > 0 && (
-                <div className="flex justify-between text-sm text-muted-foreground">
-                  <span>Taxa de serviço:</span>
-                  <span>R$ {currentOrder.service_fee.toFixed(2)}</span>
-                </div>
-              )}
-              <div className="flex justify-between items-center pt-2 border-t">
-                <span className="text-xl font-semibold">Total:</span>
-                <span className="text-3xl font-bold text-green-600">
-                  R$ {currentOrder.total.toFixed(2)}
-                </span>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Pagamento: {currentOrder.payment_method === 'cash' && 'Dinheiro'}
-                {currentOrder.payment_method === 'credit_card' && 'Cartão de Crédito'}
-                {currentOrder.payment_method === 'debit_card' && 'Cartão de Débito'}
-                {currentOrder.payment_method === 'pix' && 'PIX'}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3 mb-4 p-3 bg-accent/50 rounded-lg">
-              <input
-                type="checkbox"
-                id="printOnClose"
-                checked={printOnClose}
-                onChange={(e) => setPrintOnClose(e.target.checked)}
-                className="h-4 w-4"
-              />
-              <Label htmlFor="printOnClose" className="cursor-pointer text-sm">
-                Imprimir recibo ao fechar pedido
-              </Label>
-            </div>
-
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                size="lg"
-                onClick={() => setCurrentOrder(null)}
-                className="flex-1"
-              >
-                Cancelar
-              </Button>
-              <Button
-                size="lg"
-                onClick={handleCloseCurrentOrder}
-                className="flex-1 gap-2"
-              >
-                <CheckCircle className="h-5 w-5" />
-                Fechar Pedido
-              </Button>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* Pedidos Pendentes */}
-      <div className="mt-8">
-        <div className="flex items-center gap-2 mb-4">
-          <Clock className="h-6 w-6" />
-          <h2 className="text-2xl font-bold">Pedidos Pendentes para Fechamento</h2>
-          <Badge variant="secondary" className="ml-2">{pendingOrders.length}</Badge>
-        </div>
+    <div className="flex h-full w-full overflow-hidden">
+      {/* Coluna de Itens do Menu */}
+      <div className="flex-1 p-4 overflow-y-auto">
+        <h1 className="text-2xl font-bold mb-4">Cardápio</h1>
         
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {pendingOrders.length === 0 ? (
-            <Card className="p-8 text-center col-span-full">
-              <Clock className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-              <p className="text-muted-foreground">Nenhum pedido pendente</p>
-            </Card>
-          ) : (
-            pendingOrders.map((order) => (
-              <Card 
-                key={order.id} 
-                className="p-4 cursor-pointer hover:shadow-lg transition-all border-2 hover:border-primary"
-                onClick={() => handleSelectPendingOrder(order)}
+        {/* Filtro de Categorias */}
+        <div className="mb-4 overflow-x-auto">
+          <div className="flex space-x-2">
+            <Button
+              variant={selectedCategory === "all" ? "default" : "outline"}
+              onClick={() => setSelectedCategory("all")}
+              className="flex-shrink-0"
+            >
+              Todas
+            </Button>
+            {categories.map((category) => (
+              <Button
+                key={category.id}
+                variant={selectedCategory === category.id ? "default" : "outline"}
+                onClick={() => setSelectedCategory(category.id)}
+                className="flex-shrink-0"
               >
-                <div className="flex justify-between items-start mb-3">
-                  <div>
-                    <h3 className="font-bold text-lg">#{order.order_number}</h3>
-                    <p className="text-xs text-muted-foreground">
-                      {new Date(order.created_at).toLocaleTimeString('pt-BR')}
-                    </p>
-                    {order.tables ? (
-                      <Badge variant="outline" className="mt-1">
-                        Mesa {order.tables.number}
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary" className="mt-1">
-                        {order.delivery_type === 'online' && '🌐 Online'}
-                        {order.delivery_type === 'delivery' && '🚚 Entrega'}
-                        {order.delivery_type === 'pickup' && '🏪 Retirada'}
-                        {order.delivery_type === 'dine_in' && '🍽️ Local'}
-                        {order.delivery_type === 'counter' && '🏪 Balcão'}
-                      </Badge>
-                    )}
-                  </div>
-                  <Badge variant={
-                    order.status === 'ready' ? 'default' : 
-                    order.status === 'preparing' ? 'secondary' : 'outline'
-                  }>
-                    {order.status === 'new' && 'Novo'}
-                    {order.status === 'confirmed' && 'Confirmado'}
-                    {order.status === 'preparing' && 'Preparando'}
-                    {order.status === 'ready' && 'Pronto'}
-                  </Badge>
-                </div>
-
-                {order.customer_name && (
-                  <p className="text-sm mb-2">
-                    <strong>Cliente:</strong> {order.customer_name}
-                  </p>
-                )}
-
-                {order.customer_phone && (
-                  <p className="text-sm mb-2">
-                    <strong>Telefone:</strong> {order.customer_phone}
-                  </p>
-                )}
-
-                <div className="bg-muted/50 rounded-md p-2 mb-3">
-                  <p className="text-xs font-semibold mb-1">Itens do pedido:</p>
-                  <div className="space-y-1 max-h-32 overflow-y-auto">
-                    {order.order_items && order.order_items.length > 0 ? (
-                      order.order_items.map((item: any) => (
-                        <div key={item.id} className="flex justify-between text-xs">
-                          <span className="truncate">{item.quantity}x {item.name}</span>
-                          <span className="ml-2 flex-shrink-0">R$ {item.total_price.toFixed(2)}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-xs text-muted-foreground italic">Sem itens</p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="pt-3 border-t">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-semibold">Total:</span>
-                    <span className="text-xl font-bold text-green-600">R$ {order.total.toFixed(2)}</span>
-                  </div>
-                </div>
-              </Card>
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* Últimos Pedidos Fechados */}
-      {recentlyClosedOrders.length > 0 && (
-        <div className="mt-8">
-          <div className="flex items-center gap-2 mb-4">
-            <CheckCircle className="h-6 w-6 text-green-600" />
-            <h2 className="text-2xl font-bold">Últimos Pedidos Fechados</h2>
-            <Badge variant="outline" className="ml-2 bg-green-50 text-green-700 border-green-200">
-              {recentlyClosedOrders.length}
-            </Badge>
-          </div>
-          
-          <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-5">
-            {recentlyClosedOrders.map((order) => (
-              <Card 
-                key={order.id} 
-                className="p-4 border-2 border-green-200 bg-green-50/50 cursor-pointer hover:shadow-lg transition-all hover:scale-105"
-                onClick={() => handleViewClosedOrder(order)}
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <h4 className="font-bold text-sm">#{order.order_number}</h4>
-                    <p className="text-xs text-muted-foreground">
-                      {new Date(order.completed_at).toLocaleTimeString('pt-BR')}
-                    </p>
-                  </div>
-                  <CheckCircle className="h-5 w-5 text-green-600" />
-                </div>
-                <div className="flex justify-between items-center pt-2 border-t">
-                  <span className="text-xs text-muted-foreground">Total</span>
-                  <span className="font-bold text-green-600">R$ {order.total.toFixed(2)}</span>
-                </div>
-              </Card>
+                {category.name}
+              </Button>
             ))}
           </div>
         </div>
-      )}
 
-      {/* Dialog de Detalhes do Pedido Fechado */}
-      <OrderDetailsDialog
-        order={selectedClosedOrder}
-        open={closedOrderDialogOpen}
+        {/* Lista de Itens */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {filteredItems.map((item) => (
+            <Card
+              key={item.id}
+              className="p-3 cursor-pointer hover:shadow-lg transition-shadow"
+              onClick={() => handleAddToCart(item)}
+            >
+              <div className="flex flex-col h-full">
+                <div className="flex-1">
+                  <h3 className="font-semibold text-lg">{item.name}</h3>
+                  {item.description && (
+                    <p className="text-sm text-muted-foreground line-clamp-2">
+                      {item.description}
+                    </p>
+                  )}
+                </div>
+                <div className="mt-2 flex justify-between items-center">
+                  <span className="text-xl font-bold text-primary">
+                    R$ {item.promotional_price ? item.promotional_price.toFixed(2).replace('.', ',') : item.price.toFixed(2).replace('.', ',')}
+                  </span>
+                  {item.promotional_price && (
+                    <span className="text-sm text-muted-foreground line-through ml-2">
+                      R$ {item.price.toFixed(2).replace('.', ',')}
+                    </span>
+                  )}
+                  <Button size="sm" className="ml-auto">
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      {/* Coluna do Carrinho e Pedidos */}
+      <div className="w-full max-w-md border-l flex flex-col bg-background">
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "new" | "pending")} className="flex flex-col flex-1">
+          <TabsList className="grid w-full grid-cols-2 rounded-none border-b">
+            <TabsTrigger value="new" className="rounded-none">
+              <ShoppingCart className="h-4 w-4 mr-2" /> Novo Pedido
+            </TabsTrigger>
+            <TabsTrigger value="pending" className="rounded-none">
+              <Clock className="h-4 w-4 mr-2" /> Pedidos Pendentes ({pendingOrders.length})
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="new" className="flex-1 flex flex-col p-4 overflow-y-auto">
+            {/* Detalhes do Pedido */}
+            <div className="space-y-4 mb-4">
+              <h2 className="text-xl font-semibold">Detalhes</h2>
+              
+              {/* Tipo de Entrega */}
+              <div className="space-y-2">
+                <Label>Tipo de Pedido</Label>
+                <Select value={deliveryType} onValueChange={(value) => setDeliveryType(value as "delivery" | "pickup" | "dine_in" | "online" | "counter")}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione o tipo de pedido" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="dine_in">Mesa / Balcão</SelectItem>
+                    <SelectItem value="pickup">Retirada</SelectItem>
+                    <SelectItem value="delivery">Delivery</SelectItem>
+                    <SelectItem value="online">Online (App/Site)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Seleção de Mesa (se dine_in) */}
+              {deliveryType === "dine_in" && (
+                <div className="space-y-2">
+                  <Label>Mesa</Label>
+                  <Select value={selectedTable} onValueChange={setSelectedTable}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione a mesa" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {tables.filter(t => t.status === 'free' || t.id === selectedTable).map(table => (
+                        <SelectItem key={table.id} value={table.id}>
+                          Mesa {table.number} {table.status === 'occupied' && table.id !== selectedTable ? '(Ocupada)' : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {/* Dados do Cliente */}
+              <div className="space-y-2">
+                <Label htmlFor="customer-name">Nome do Cliente</Label>
+                <Input
+                  id="customer-name"
+                  placeholder="Nome"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="customer-phone">Telefone</Label>
+                <Input
+                  id="customer-phone"
+                  placeholder="(99) 99999-9999"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Itens do Carrinho */}
+            <h2 className="text-xl font-semibold mb-2 flex justify-between items-center">
+              Carrinho ({cart.length})
+              <Button variant="ghost" size="sm" onClick={clearCart} disabled={cart.length === 0}>
+                <Trash2 className="h-4 w-4 mr-1" /> Limpar
+              </Button>
+            </h2>
+            <div className="flex-1 space-y-3 overflow-y-auto pr-2">
+              {cart.map((item, index) => (
+                <Card key={index} className="p-3 flex items-center justify-between">
+                  <div className="flex-1">
+                    <p className="font-medium">{item.name}</p>
+                    {item.customizationsText && (
+                      <p className="text-xs text-muted-foreground italic">{item.customizationsText}</p>
+                    )}
+                    <p className="text-sm text-primary">
+                      R$ {(item.finalPrice || item.price).toFixed(2).replace('.', ',')}
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => updateQuantity(item.id, -1)}
+                    >
+                      <Minus className="h-3 w-3" />
+                    </Button>
+                    <span className="w-5 text-center font-medium">{item.quantity}</span>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => updateQuantity(item.id, 1)}
+                    >
+                      <Plus className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-red-500 hover:text-red-700"
+                      onClick={() => removeFromCart(item.id)}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+              {cart.length === 0 && (
+                <p className="text-center text-muted-foreground pt-10">Adicione itens ao carrinho.</p>
+              )}
+            </div>
+
+            {/* Resumo e Ações */}
+            <div className="mt-4 pt-4 border-t space-y-3 flex-shrink-0">
+              <div className="flex justify-between items-center">
+                <Label htmlFor="service-fee">Incluir Taxa de Serviço (10%)</Label>
+                <input
+                  type="checkbox"
+                  id="service-fee"
+                  checked={includeServiceFee}
+                  onChange={(e) => setIncludeServiceFee(e.target.checked)}
+                  className="h-4 w-4 text-primary rounded border-gray-300 focus:ring-primary"
+                />
+              </div>
+              <div className="flex justify-between font-medium">
+                <span>Subtotal:</span>
+                <span>R$ {subtotal.toFixed(2).replace('.', ',')}</span>
+              </div>
+              {includeServiceFee && (
+                <div className="flex justify-between text-sm text-muted-foreground">
+                  <span>Taxa de Serviço (10%):</span>
+                  <span>R$ {serviceFee.toFixed(2).replace('.', ',')}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-2xl font-bold text-primary">
+                <span>Total:</span>
+                <span>R$ {total.toFixed(2).replace('.', ',')}</span>
+              </div>
+
+              {/* Método de Pagamento */}
+              <div className="space-y-2">
+                <Label>Método de Pagamento</Label>
+                <RadioGroup value={paymentMethod} onValueChange={(value) => setPaymentMethod(value as "cash" | "credit_card" | "debit_card" | "pix")}>
+                  <div className="flex space-x-4">
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="cash" id="r1" />
+                      <Label htmlFor="r1">Dinheiro</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="credit_card" id="r2" />
+                      <Label htmlFor="r2">Crédito</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="debit_card" id="r3" />
+                      <Label htmlFor="r3">Débito</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="pix" id="r4" />
+                      <Label htmlFor="r4">Pix</Label>
+                    </div>
+                  </div>
+                </RadioGroup>
+              </div>
+
+              {/* Opções de Impressão */}
+              <div className="flex justify-between items-center text-sm text-muted-foreground">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="print-kitchen"
+                    checked={shouldPrint}
+                    onChange={(e) => setShouldPrint(e.target.checked)}
+                    className="h-4 w-4 text-primary rounded border-gray-300 focus:ring-primary"
+                  />
+                  <Label htmlFor="print-kitchen">Imprimir para Cozinha</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="print-close"
+                    checked={printOnClose}
+                    onChange={(e) => setPrintOnClose(e.target.checked)}
+                    className="h-4 w-4 text-primary rounded border-gray-300 focus:ring-primary"
+                  />
+                  <Label htmlFor="print-close">Imprimir Recibo ao Fechar</Label>
+                </div>
+              </div>
+
+              {/* Botões de Ação */}
+              <div className="space-y-2">
+                {currentOrder ? (
+                  <>
+                    <Button 
+                      className="w-full bg-green-600 hover:bg-green-700" 
+                      onClick={handleCloseCurrentOrder}
+                      disabled={cart.length === 0}
+                    >
+                      <CheckCircle className="h-4 w-4 mr-2" /> Fechar Pedido (R$ {total.toFixed(2).replace('.', ',')})
+                    </Button>
+                    <div className="flex space-x-2">
+                      <Button 
+                        className="flex-1" 
+                        variant="outline" 
+                        onClick={handleUpdateOrder}
+                        disabled={cart.length === 0}
+                      >
+                        Atualizar Pedido
+                      </Button>
+                      <Button 
+                        className="flex-1" 
+                        variant="destructive" 
+                        onClick={handleCancelOrder}
+                      >
+                        Cancelar Pedido
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <Button 
+                    className="w-full" 
+                    onClick={handleCreateOrder}
+                    disabled={cart.length === 0 || (deliveryType === 'dine_in' && !selectedTable)}
+                  >
+                    Criar Pedido
+                  </Button>
+                )}
+                
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="pending" className="flex-1 flex flex-col p-4 overflow-y-auto">
+            <h2 className="text-xl font-semibold mb-4">Pedidos em Andamento</h2>
+            <div className="space-y-3 flex-1 overflow-y-auto pr-2">
+              {pendingOrders.map((order) => (
+                <Card key={order.id} className="p-3">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="font-bold">Pedido #{order.order_number}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {order.delivery_type === 'dine_in' && order.table_id ? `Mesa ${getTableNumber(order.table_id)}` : order.delivery_type}
+                      </p>
+                      <Badge 
+                        className="mt-1"
+                        variant={order.status === 'new' ? 'default' : order.status === 'confirmed' ? 'secondary' : 'outline'}
+                      >
+                        {order.status}
+                      </Badge>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-bold text-primary">R$ {order.total.toFixed(2).replace('.', ',')}</p>
+                      <Button 
+                        variant="link" 
+                        size="sm" 
+                        onClick={() => handleLoadOrderToCart(order)}
+                        className="h-auto p-0"
+                      >
+                        Carregar para Caixa
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+              {pendingOrders.length === 0 && (
+                <p className="text-center text-muted-foreground pt-10">Nenhum pedido pendente.</p>
+              )}
+            </div>
+
+            <h2 className="text-xl font-semibold mt-6 mb-4 border-t pt-4">Últimos Fechados</h2>
+            <div className="space-y-3 flex-shrink-0">
+              {recentlyClosedOrders.map((order) => (
+                <Card key={order.id} className="p-3">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="font-bold">Pedido #{order.order_number}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {order.delivery_type === 'dine_in' && order.table_id ? `Mesa ${getTableNumber(order.table_id)}` : order.delivery_type}
+                      </p>
+                      <Badge className="mt-1" variant="success">
+                        Fechado
+                      </Badge>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-bold text-green-600">R$ {order.total.toFixed(2).replace('.', ',')}</p>
+                      <Button 
+                        variant="link" 
+                        size="sm" 
+                        onClick={() => handleViewClosedOrder(order)}
+                        className="h-auto p-0"
+                      >
+                        Ver Detalhes
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+              {recentlyClosedOrders.length === 0 && (
+                <p className="text-center text-muted-foreground pt-4">Nenhum pedido fechado recentemente.</p>
+              )}
+            </div>
+          </TabsContent>
+        </Tabs>
+      </div>
+      
+      <OrderDetailsDialog 
+        isOpen={closedOrderDialogOpen}
         onOpenChange={setClosedOrderDialogOpen}
+        order={selectedClosedOrder}
         restaurantName={restaurantName}
+        tables={tables}
       />
 
-      {/* Dialog de Customização */}
       <CustomizeItemDialog
-        open={customizeDialogOpen}
+        isOpen={customizeDialogOpen}
         onOpenChange={setCustomizeDialogOpen}
         item={selectedItem}
-        onAddToCart={addToCart}
+        onSave={handleSaveCustomization}
       />
     </div>
   );
