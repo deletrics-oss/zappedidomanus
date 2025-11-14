@@ -7,9 +7,21 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Wallet, TrendingUp, TrendingDown, Plus, Printer, Calendar } from "lucide-react";
 import { format } from "date-fns";
-import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { getDocuments, createDocument } from "@/lib/firebase-db";
+import { where, orderBy } from "firebase/firestore";
+
+interface CashMovement {
+  id: string;
+  type: 'entrada' | 'saida' | 'entry' | 'exit';
+  description: string;
+  amount: number;
+  movementDate: string;
+  paymentMethod: string;
+  category: string;
+  createdAt: string;
+}
 
 export default function Caixa() {
   const queryClient = useQueryClient();
@@ -17,50 +29,54 @@ export default function Caixa() {
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Buscar movimentações de caixa (já integrado com PDV)
-  const { data: cashMovements = [] } = useQuery({
+  // Buscar movimentações de caixa
+  const { data: cashMovements = [], isLoading } = useQuery({
     queryKey: ['cash-movements', startDate, endDate],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('cash_movements')
-        .select('*')
-        .gte('movement_date', startDate)
-        .lte('movement_date', endDate)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
+      const movements = await getDocuments('cashMovements', [
+        where('movementDate', '>=', startDate),
+        where('movementDate', '<=', endDate),
+        orderBy('movementDate', 'desc'),
+        orderBy('createdAt', 'desc'),
+      ]);
+      
+      return movements as CashMovement[] || [];
     },
   });
 
   // Calcular totais
   const totalEntradas = cashMovements
-    .filter((m: any) => m.type === 'entrada' || m.type === 'entry')
-    .reduce((sum: number, m: any) => sum + (m.amount || 0), 0);
+    .filter((m: CashMovement) => m.type === 'entrada' || m.type === 'entry')
+    .reduce((sum: number, m: CashMovement) => sum + (m.amount || 0), 0);
   
   const totalSaidas = cashMovements
-    .filter((m: any) => m.type === 'saida' || m.type === 'exit')
-    .reduce((sum: number, m: any) => sum + (m.amount || 0), 0);
+    .filter((m: CashMovement) => m.type === 'saida' || m.type === 'exit')
+    .reduce((sum: number, m: CashMovement) => sum + (m.amount || 0), 0);
   
   const saldo = totalEntradas - totalSaidas;
 
   // Mutation para criar movimentação
-  const createMovement = useMutation({
+  const createMovementMutation = useMutation({
     mutationFn: async (data: any) => {
-      const { error } = await supabase.from('cash_movements').insert([{
+      await createDocument('cashMovements', {
         type: data.type,
         description: data.description,
         amount: Math.abs(parseFloat(data.value)),
-        movement_date: new Date().toISOString().split('T')[0],
-        payment_method: data.payment_method,
-        category: data.category
-      }]);
-      if (error) throw error;
+        movementDate: new Date().toISOString().split('T')[0],
+        paymentMethod: data.payment_method,
+        category: data.category,
+        createdAt: new Date().toISOString(),
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cash-movements'] });
       toast.success("Movimentação registrada!");
       setShowForm(false);
     },
+    onError: (error) => {
+      console.error("Erro ao registrar movimentação:", error);
+      toast.error("Erro ao registrar movimentação.");
+    }
   });
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -68,7 +84,7 @@ export default function Caixa() {
     const formData = new FormData(e.currentTarget);
     const type = formData.get('type') || 'entrada';
     
-    createMovement.mutate({
+    createMovementMutation.mutate({
       type,
       description: formData.get('description'),
       value: formData.get('value'),
@@ -141,7 +157,7 @@ export default function Caixa() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">R$ {totalEntradas.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground">{cashMovements.filter((m: any) => m.type === 'entrada' || m.type === 'entry').length} transações</p>
+            <p className="text-xs text-muted-foreground">{cashMovements.filter((m: CashMovement) => m.type === 'entrada' || m.type === 'entry').length} transações</p>
           </CardContent>
         </Card>
 
@@ -152,7 +168,7 @@ export default function Caixa() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-600">R$ {totalSaidas.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground">{cashMovements.filter((m: any) => m.type === 'saida' || m.type === 'exit').length} transações</p>
+            <p className="text-xs text-muted-foreground">{cashMovements.filter((m: CashMovement) => m.type === 'saida' || m.type === 'exit').length} transações</p>
           </CardContent>
         </Card>
 
@@ -264,11 +280,11 @@ export default function Caixa() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {cashMovements.map((movement: any) => {
+              {cashMovements.map((movement: CashMovement) => {
                 const isEntrada = movement.type === 'entrada' || movement.type === 'entry';
                 return (
                   <TableRow key={movement.id}>
-                    <TableCell>{format(new Date(movement.movement_date || movement.created_at), 'dd/MM/yyyy')}</TableCell>
+                    <TableCell>{format(new Date(movement.movementDate || movement.createdAt), 'dd/MM/yyyy')}</TableCell>
                     <TableCell>
                       <Badge variant={isEntrada ? 'default' : 'destructive'}>
                         {isEntrada ? (
@@ -289,11 +305,11 @@ export default function Caixa() {
                       {isEntrada ? '+' : '-'} R$ {movement.amount?.toFixed(2)}
                     </TableCell>
                     <TableCell className="bg-background text-foreground">
-                      {movement.payment_method === 'pix' ? 'PIX' : 
-                       movement.payment_method === 'cash' ? 'Dinheiro' :
-                       movement.payment_method === 'credit_card' ? 'Cartão de Crédito' :
-                       movement.payment_method === 'debit_card' ? 'Cartão de Débito' :
-                       movement.payment_method || '-'}
+                      {movement.paymentMethod === 'pix' ? 'PIX' : 
+                       movement.paymentMethod === 'cash' ? 'Dinheiro' :
+                       movement.paymentMethod === 'credit_card' ? 'Cartão de Crédito' :
+                       movement.paymentMethod === 'debit_card' ? 'Cartão de Débito' :
+                       movement.paymentMethod || '-'}
                     </TableCell>
                   </TableRow>
                 );
