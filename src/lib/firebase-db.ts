@@ -41,8 +41,9 @@ export const createDocument = async (collectionName: string, data: any) => {
   }
 };
 
-export const getDocument = async (collectionName: string, docId: string) => {
+export const getDocument = async (collectionName: string, docId: string | undefined) => {
   try {
+    if (!docId) return null; // Adicionado tratamento para docId undefined
     const docRef = doc(db, collectionName, docId);
     const docSnap = await getDoc(docRef);
     
@@ -58,6 +59,7 @@ export const getDocument = async (collectionName: string, docId: string) => {
 
 export const updateDocument = async (collectionName: string, docId: string, data: any) => {
   try {
+    if (!docId) return null; // Adicionado tratamento para docId undefined
     const docRef = doc(db, collectionName, docId);
     await updateDoc(docRef, {
       ...data,
@@ -71,6 +73,7 @@ export const updateDocument = async (collectionName: string, docId: string, data
 
 export const deleteDocument = async (collectionName: string, docId: string) => {
   try {
+    if (!docId) return null; // Adicionado tratamento para docId undefined
     const docRef = doc(db, collectionName, docId);
     await deleteDoc(docRef);
   } catch (error) {

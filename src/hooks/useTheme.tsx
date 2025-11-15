@@ -23,8 +23,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     const loadTheme = async () => {
       // No Firestore, a preferência do usuário deve ser um documento na coleção 'userPreferences'
-      // com o ID do documento sendo o user.id
-      const preference = await getDocument('userPreferences', user.id);
+      // com o ID do documento sendo o user.uid
+      const preference = await getDocument('userPreferences', user.uid);
 
       if (preference?.theme) {
         setThemeState(preference.theme as Theme);
@@ -67,7 +67,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (user) {
       // Save to database
       // No Firestore, usamos updateDocument com o ID do usuário para criar/atualizar
-      await updateDocument('userPreferences', user.id, {
+      await updateDocument('userPreferences', user.uid, {
         theme: newTheme,
         updatedAt: new Date().toISOString(),
       }, true); // O 'true' indica que é um set/merge
